@@ -21,3 +21,12 @@ A APP for quick and easy data manipulation and analysis.
 2. You can install packages by chick "Install package" Button
 3. You can uninstall packages by chick "Uninstall package" Button
 4. You can upgrade packages by chick "Upgrade package" Button(2.0 or higher,hide by default)
+
+# My introduction
+
+## My Github stats
+
+![My GitHub stats](https://github-readme-stats.vercel.app/api?username=pyquick&show_icons=true&theme=radical)
+
+I'm a developer. Also, I'm a student (age:TVRRPQ==) in **Q2hpbmE=** ! I‘m interested in **UHl0aG9u**, **Qysr** and **bW9yZQ==**.
+I'm the main Contributor of pyquick.
