@@ -1,3 +1,5 @@
 requests
 sv_ttk
-pyinstaller
+nuitka
+bs4
+darkdetect

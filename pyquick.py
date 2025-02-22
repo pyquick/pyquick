@@ -4,18 +4,16 @@ import subprocess
 import os
 import threading
 import requests
-import getpass
-import shutil
+from get_system_build import block_features
+import darkdetect
 import re
 import time
 from save_path import create_folder,sav_path
 requests.packages.urllib3.disable_warnings()
 import sv_ttk
-import shlex
 import logging
 import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
-import functools
 from bs4 import BeautifulSoup
 config_path=create_folder.get_path("pyquick","1960")
 cancel_event = threading.Event()
@@ -478,7 +476,6 @@ def get_latest_pip_version():
         logging.error(f"Error getting latest pip version: {e}")
         return "Unknown"
 def upgrade_pip():
-    
     def upgrade_pip_thread():
         try:
             disabled_pip()
@@ -494,8 +491,10 @@ def upgrade_pip():
             else:
                 package_label.config(text=f"Upgrading pip from v{current_version} to v{latest_version}...")
                 try:
-                    subprocess.run(["python3", "-m", "pip", "install", "--upgrade", "pip", "--break-system-packages"], stderr=subprocess.STDOUT, text=True,capture_output=True,shell=True)
-                    package_label.config(text=f"Pip has been upgraded to v{latest_version}.")
+                    result=subprocess.run(["pip3", "install", "--upgrade", "pip", "--break-system-packages"], text=True,capture_output=True)
+                    if "Successfully installed" in result.stdout:
+                        package_label.config(text=f"Pip has been upgraded to v{latest_version}.")
+
                 except subprocess.CalledProcessError as e:
                     package_label.config(text=f"Error upgrading pip: {e.output}")
         except Exception as e:
@@ -571,47 +570,70 @@ def show_about():
     else:
         messagebox.showinfo("About", f"Version: dev\nBuild: 1960\n{time_lim} days left.")
 def load_theme():
-    try:
-        theme=sav_path.read_path(config_path,"theme.txt","readline")
-        if theme=="light":
-            sv_ttk.set_theme("light")
-        elif theme=="dark":
-            sv_ttk.set_theme("dark")
-        else:
-            sv_ttk.set_theme("light")
-    except FileNotFoundError:
-        sv_ttk.set_theme("light")
-    except Exception as e:
-        sv_ttk.set_theme("light")
-def save_theme():
-    theme=sv_ttk.get_theme()
-    sav_path.save_path(config_path,"theme.txt","w",theme)
-def settings():
-    def load_theme():
+    if block_features.block_theme():
         try:
             theme=sav_path.read_path(config_path,"theme.txt","readline")
             if theme=="light":
                 sv_ttk.set_theme("light")
-                switch.set(0)
             elif theme=="dark":
                 sv_ttk.set_theme("dark")
-                switch.set(1)
+            else:
+                sv_ttk.set_theme(darkdetect.theme())
+        except FileNotFoundError:
+            sv_ttk.set_theme(darkdetect.theme())
+        except Exception as e:
+            sv_ttk.set_theme(darkdetect.theme())
+    else:
+        try:
+            sav_path.remove_file(config_path,"theme.txt")
+        except:
+            pass
+def save_theme():
+    if block_features.block_theme():
+        theme=sv_ttk.get_theme()
+        sav_path.save_path(config_path,"theme.txt","w",theme)
+def settings():
+    def load_theme():
+        if block_features.block_theme():
+            try:
+                theme=sav_path.read_path(config_path,"theme.txt","readline")
+                if theme=="light":
+                    sv_ttk.set_theme("light")
+                    switch.set(0)
+                elif theme=="dark":
+                    sv_ttk.set_theme("dark")
+                    switch.set(1)
+                else:
+                    sv_ttk.set_theme(darkdetect.theme())
+                    if darkdetect.theme()=="Light":
+                        switch.set(0)
+                    if darkdetect.theme()=="Dark":
+                        switch.set(1)
+            except FileNotFoundError:
+                sv_ttk.set_theme(darkdetect.theme())
+                if darkdetect.theme()=="Light":
+                    switch.set(0)
+                if darkdetect.theme()=="Dark":
+                    switch.set(1)
+            except Exception as e:
+                sv_ttk.set_theme(darkdetect.theme())
+                if darkdetect.theme()=="Light":
+                    switch.set(0)
+                if darkdetect.theme()=="Dark":        
+                    switch.set(1)
+        else:
+            try:
+                sav_path.remove_file(config_path,"theme.txt")
+            except:
+                pass
+    def switch_theme():
+        if block_features.block_theme():
+            if switch.get():
+                sv_ttk.set_theme("dark")
+                sav_path.save_path(config_path,"theme.txt","w","dark")
             else:
                 sv_ttk.set_theme("light")
-                switch.set(0)
-        except FileNotFoundError:
-            sv_ttk.set_theme("light")
-            switch.set(0)
-        except Exception as e:
-            sv_ttk.set_theme("light")
-            switch.set(0)
-    def switch_theme():
-        if switch.get():
-            sv_ttk.set_theme("dark")
-            sav_path.save_path(config_path,"theme.txt","w","dark")
-        else:
-            sv_ttk.set_theme("light")
-            sav_path.save_path(config_path,"theme.txt","w","light")
+                sav_path.save_path(config_path,"theme.txt","w","light")
     window=tk.Toplevel(root)
     window.title("Settings")
     window.resizable(False,False)
@@ -620,20 +642,36 @@ def settings():
     control = ttk.Notebook(window)
     ftheme= ttk.Frame(window, padding="20")
     proxy=ttk.Frame(window, padding="20")
-    control.add(ftheme,text="Switch Theme")
-    control.grid(row=0, padx=5, pady=5)
+    if block_features.block_theme():
+        control.add(ftheme,text="Switch Theme")
+        control.grid(row=0, padx=5, pady=5)
     control.add(proxy,text="Proxy")
     control.grid(row=0, padx=5, pady=5)
-
-    theme_tab=ttk.Frame(ftheme)
-    theme_tab.grid(row=0,column=0,padx=5, pady=5)
+    if block_features.block_theme():
+        theme_tab=ttk.Frame(ftheme)
+        theme_tab.grid(row=0,column=0,padx=5, pady=5)
     proxy_tab=ttk.Frame(proxy)
     proxy_tab.grid(row=0,column=0,padx=5, pady=5)
+    if block_features.block_theme():
+        switch=tk.BooleanVar()
+        sw_theme=ttk.Checkbutton(theme_tab,text="Switch Theme",variable=switch,command=switch_theme,style="Switch.TCheckbutton")
+        sw_theme.grid(row=0,column=0,padx=20, pady=20)
 
-    switch=tk.BooleanVar()
-    sw_theme=ttk.Checkbutton(theme_tab,text="Switch Theme",variable=switch,command=switch_theme,style="Switch.TCheckbutton")
-    sw_theme.grid(row=0,column=0,padx=20, pady=20)
+    # Proxy
+    proxy_label=ttk.Label(proxy_tab,text="HTTP/HTTPS Proxy:")
+    proxy_label.grid(row=0,column=0,padx=20, pady=20)
+    proxy_entry=ttk.Entry(proxy_tab,width=30)
+    proxy_entry.grid(row=0,column=1,padx=20, pady=20)
+
+    port_label=ttk.Label(proxy_tab,text="Port:")
+    port_label.grid(row=1,column=0,padx=20, pady=20)
+    port_entry=ttk.Entry(proxy_tab,width=10)
+    port_entry.grid(row=1,column=1,padx=20, pady=20)
     load_theme()
+
+
+
+
 def on_closing():
     global is_downloading
     if is_downloading:
@@ -645,8 +683,16 @@ def on_closing():
     subprocess.Popen("killall pyquick",text=True,shell=True)
     subprocess.Popen("killall Pyquick",text=True,shell=True)
 
+
+
+
+
+
+
+
+
 #GUI
-if __name__ == "__main__":
+if __name__ == "__main__" and block_features.block_start():
     #启动laugh = True
     if(datetime.datetime.now()>=datetime.datetime(2025,3,13)):
         messagebox.showerror("Error","You can not open python_tool:exitcode(0x1)")
@@ -730,8 +776,8 @@ if __name__ == "__main__":
     cancel_download_button.grid_forget()
 
     
-    download_pb=ttk.Progressbar(framea_tab,length=500,mode="determinate")
-    download_pb.grid(row=6,column=0,pady=20,columnspan=3, padx=20)
+    download_pb=ttk.Progressbar(framea_tab,length=800)
+    download_pb.grid(row=6,column=0,pady=80,columnspan=3, padx=20)
     
     status_label = ttk.Label(framea_tab, text="", padding="10")
     status_label.grid(row=7, column=0, columnspan=3, pady=20, padx=20)
@@ -769,3 +815,7 @@ if __name__ == "__main__":
     load_theme()
     root.mainloop()
     #root.after(3000,)
+if block_features.block_start()==False:
+    from get_system_build import system_build
+    messagebox.showerror("Error",f"You can not open Pyquick:\nYour system is not supported. \n(Your version: {system_build.get_system_name()} {system_build.get_system_release_build_version()})\n Please upgrade to macOS 10.13(Darwin 17) or later.")
+    exit(1)
