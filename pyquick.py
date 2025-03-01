@@ -6,7 +6,7 @@ import logging
 import os
 import re
 import sys
-
+import multiprocessing
 import subprocess
 import threading
 import time
@@ -21,11 +21,11 @@ from bs4 import BeautifulSoup
 import urllib3
 import platform
 requests.packages.urllib3.disable_warnings()
-
+processes=[]
 def get_python_version():
     """获取当前Python版本"""
     all_versions=[]
-    versions_base=subprocess.run(["where","python"],capture_output=True,creationflags=subprocess.CREATE_NO_WINDOW)
+    versions_base=subprocess.run(["where","python"],capture_output=True,shell=True,creationflags=subprocess.CREATE_NO_WINDOW)
     python_version=(versions_base.stdout).decode().split("\n")
     #print(python_version)
     name=r"Python\d+"
@@ -45,23 +45,20 @@ PIP_MIRRORS = [
     "https://pypi.mirrors.ustc.edu.cn/simple",
     "https://pypi.doubanio.com/simple",
     "https://pypi.hustunique.com/simple",
-    "https://pypi.sdutlinux.org/simple",
+    "https://pypi.sdutlinux.org/simple",dddddddddde
     "https://mirrors.cloud.tencent.com/pypi/simple",
-    "https://mirrors.huaweicloud.com/repository/pypi/simple",
     "https://mirrors.sustech.edu.cn/pypi/web/simple",
     "https://mirrors.ustc.edu.cn/pypi/web/simple",
 ]
 def save_path():
     def thread():
-        all_path=[]
-        versions_base=subprocess.run(["where","python"],capture_output=True,creationflags=subprocess.CREATE_NO_WINDOW)
-        
+        versions_base=subprocess.Popen(["where","python"],text=True,creationflags=subprocess.CREATE_NO_WINDOW)
         with open(os.path.join(config_path, "pythonpath.txt"), "w") as f:
-            f.write(versions_base.stdout.decode().strip("\r"))
+            f.write(versions_base.stdout.strip("\r"))
     while True:
-        threading.Thread(target=thread, daemon=True).start()
-        time.sleep(0.3)
-
+       p=multiprocessing.Process(target=thread)
+       p.start()
+       time.sleep(0.3)
 def allow_thread():
     def thread():
         with open(os.path.join(config_path, "allowthread.txt"), "r") as r:
@@ -138,10 +135,9 @@ ssl.create_default_context=ssl._create_unverified_context()
 urllib3.disable_warnings()
 # 获取当前工作目录
 MY_PATH = os.getcwd()
-print(MY_PATH)
 aa=os.path.join(MY_PATH,os.path.basename(__file__))
 bb=os.path.basename(__file__).split(".")[0]
-version_pyquick="2000"
+version_pyquick="2004"
 # 获取用户配置目录
 config_path_base = os.path.join(os.environ["APPDATA"], f"pyquick")
 config_path=os.path.join(config_path_base,version_pyquick)
@@ -164,7 +160,7 @@ if not os.path.exists(os.path.join(config_path, "allowthread.txt")):
         fw.write("False")
         fw.write("\n") 
 if not os.path.exists(os.path.join(config_path, "pipmirror.txt")):
-    pipmirror=subprocess.run(["pip","config","get","global.index-url"],capture_output=True,text=True,creationflags=subprocess.CREATE_NO_WINDOW)
+    pipmirror=subprocess.run(["pip","config","get","global.index-url"],capture_output=True,shell=True,text=True,creationflags=subprocess.CREATE_NO_WINDOW)
     with open(os.path.join(config_path, "pipmirror.txt"), "a")as fw:
         fw.write(pipmirror.stdout.strip("\n"))
 if not os.path.exists(os.path.join(config_path, "allowupdatepip.txt")):
@@ -188,10 +184,10 @@ def show_about():
     if datetime.datetime.now() >= datetime.datetime(2025, 2, 4):
         time_lim = (datetime.datetime(2025, 4, 13) - datetime.datetime.now()).days
         messagebox.showwarning("About",
-                               f"Version: Pyquick Magic dev\nBuild: 2000\nExpiration time:2025/4/13\n only {time_lim} days left.")
+                               f"Version: Pyquick Magic dev\nBuild: 2004\nExpiration time:2025/4/13\n only {time_lim} days left.")
     else:
         time_lim = (datetime.datetime(2025, 4, 13) - datetime.datetime.now()).days
-        messagebox.showinfo("About", f"Version: Pyquick Magic dev\nBuild: 2000\nExpiration time:2025/4/13\n{time_lim} days left.")
+        messagebox.showinfo("About", f"Version: Pyquick Magic dev\nBuild: 2004\nExpiration time:2025/4/13\n{time_lim} days left.")
 
 
 # 全局变量
@@ -690,7 +686,6 @@ def show_pip_version():
     
     def thread():
         pip_upgrade_button.config(text="Checking...",state="disabled")
-        time.sleep(0.5)
         try:
             version_pip=get_pip_version()
             with open(os.path.join(config_path,"pythonversion.txt"),"r") as f:
@@ -1361,13 +1356,41 @@ if not os.path.exists(os.path.join(config_path, "windowopenorclose.txt")):
         f.write("close")
 def settings():
     #global select_python_version_combobox, python_download_mirror, allow_thread_combobox, switch, themes, python_version
-    import sv_ttk
     with open(os.path.join(config_path, "windowopenorclose.txt"), "w") as w: 
         w.write("open")
-    def on_closing():
-        with open(os.path.join(config_path, "windowopenorclose.txt"), "w") as f:
-            f.write("close")	
-        w.destroy()
+    def set_pip_mirror():
+        def thread():
+            """设置pip镜像源""" 
+            if pip_mirror_combobox.get()!="" or pip_mirror_combobox.get()!=None:
+                try:
+                    with open(os.path.join(os.path.join(config_path,"pythonversion.txt")),"r") as f:
+                        version_pip=f.readlines()[-1].strip("\n")
+                except:
+                    version_pip=""
+                
+                if version_pip=="":
+                    return None
+                version_p=list(version_pip)
+                if "Pip3" in version_pip:
+                    if len(version_p)==5:
+                        version="3."+version_p[-1]
+                    else:
+                        version="3."+version_p[-2]+version_p[-1]
+                if "Pip2" in version_pip:
+                    version="2."+version_p[-1]
+                try:
+                    subprocess.run([f"pip{version}.exe", "config", "set","global.index-url",pip_mirror_combobox.get()], creationflags=subprocess.CREATE_NO_WINDOW, text=True, capture_output=True,shell=True)
+                except:
+                    pass
+        while True:
+            with open(os.path.join(config_path, "windowopenorclose.txt"), "r") as r:
+                aa=r.readline()
+            if aa=="open":
+                a=threading.Thread(target=thread,daemon=True)
+                a.start()
+                a.join()
+            time.sleep(0.2)
+    
     def switch_theme():
         """切换主题"""
         if build>22000:
@@ -1407,6 +1430,10 @@ def settings():
                     if (select_python_version_combobox.get()!="" or select_python_version_combobox.get()!=None) and "Pip" in select_python_version_combobox.get():
                         d.write(select_python_version_combobox.get())
                         d.write("\n")
+                with open(os.path.join(config_path, "pipmirror.txt"), "a") as e:
+                    if pip_mirror_combobox.get()!="" or pip_mirror_combobox.get()!=None:
+                        e.write(pip_mirror_combobox.get())
+                        e.write("\n")
             except:
                 pass
         while True:
@@ -1417,6 +1444,7 @@ def settings():
                 a.start()
                 a.join()
             time.sleep(0.2)
+
     def read_pythonmirror():
         if os.path.exists(os.path.join(config_path, "pythonmirror.txt")):
             with open(os.path.join(config_path, "pythonmirror.txt"), "r") as r:
@@ -1456,8 +1484,21 @@ def settings():
                     return 0
         else:
             return 0
+    def read_pip_mirror():
+        if os.path.exists(os.path.join(config_path, "pipmirror.txt")):
+            with open(os.path.join(config_path, "pipmirror.txt"), "r") as r:
+                aa=r.readlines()
+                if len(aa)>0:
+                    b=aa[len(aa)-1].strip("\n")
+                    for i in range(len(PIP_MIRRORS)):
+                        if b==PIP_MIRRORS[i]:
+                            return i
+                else:
+                    return 0
+        else:
+            return 0
     py_ver=read_py_ver()
-    
+    pip_mirror=read_pip_mirror()
     w=tk.Toplevel(root)
     w.title("Settings")
     w.resizable(False, False)
@@ -1510,10 +1551,18 @@ def settings():
     select_python_version_combobox.grid(row=0, column=1, pady=10, padx=10, sticky="w")
     select_python_version_combobox.current(py_ver)
 
+    select_pip_mirror_label=ttk.Label(pip_se_frame,text="Select Pip Mirror:")
+    select_pip_mirror_label.grid(row=1, column=0, pady=10, padx=10, sticky="e")
+
+    pip_mirror_combobox=ttk.Combobox(pip_se_frame,values=PIP_MIRRORS,state="readonly",width=50)
+    pip_mirror_combobox.grid(row=1, column=1, pady=10, padx=10, sticky="w")
+    pip_mirror_combobox.current(pip_mirror)
+
     if build>22000:
         load_theme()
     threading.Thread(target=save_settings, daemon=True).start()
     threading.Thread(target=open_close, daemon=True).start()
+    threading.Thread(target=set_pip_mirror,daemon=True).start()
     w.mainloop()
 
 
@@ -1671,5 +1720,5 @@ if __name__ == "__main__":
     threading.Thread(target=check_package_upgradeable, daemon=True).start()
     threading.Thread(target=allow_thread, daemon=True).start()
     threading.Thread(target=show_pip_version, daemon=True).start()
-    threading.Thread(target=save_path, daemon=True).start()
+    multiprocessing.Process(target=save_path).start()
     root.mainloop()
