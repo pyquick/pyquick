@@ -634,6 +634,7 @@ def settings():
             else:
                 sv_ttk.set_theme("light")
                 sav_path.save_path(config_path,"theme.txt","w","light")
+    
     window=tk.Toplevel(root)
     window.title("Settings")
     window.resizable(False,False)
@@ -658,7 +659,7 @@ def settings():
         sw_theme.grid(row=0,column=0,padx=20, pady=20)
 
     # Proxy
-    proxy_label=ttk.Label(proxy_tab,text="HTTP/HTTPS Proxy:")
+    proxy_label=ttk.Label(proxy_tab,text="HTTP Proxy:")
     proxy_label.grid(row=0,column=0,padx=20, pady=20)
     proxy_entry=ttk.Entry(proxy_tab,width=30)
     proxy_entry.grid(row=0,column=1,padx=20, pady=20)
@@ -667,6 +668,44 @@ def settings():
     port_label.grid(row=1,column=0,padx=20, pady=20)
     port_entry=ttk.Entry(proxy_tab,width=10)
     port_entry.grid(row=1,column=1,padx=20, pady=20)
+
+    proxys_label=ttk.Label(proxy_tab,text="HTTPS Proxy:")
+    proxys_label.grid(row=2,column=0,padx=20, pady=20)
+    proxys_entry=ttk.Entry(proxy_tab,width=30)
+    proxys_entry.grid(row=2,column=1,padx=20, pady=20)
+
+    ports_label=ttk.Label(proxy_tab,text="Port:")
+    ports_label.grid(row=3,column=0,padx=20, pady=20)
+    ports_entry=ttk.Entry(proxy_tab,width=10)
+    ports_entry.grid(row=3,column=1,padx=20, pady=20)
+
+    user=tk.BooleanVar()
+    checkuser=ttk.Checkbutton(proxy_tab,text="Proxy needs username and password",variable=user,style="Switch.TCheckbutton")
+    checkuser.grid(row=4,column=0,columnspan=2,padx=20, pady=20)
+    def uspa():
+        def thread():
+            try:
+                a=user.get()
+                if a:
+                    username_label.grid(row=5,column=0,padx=20, pady=20)
+                    username_entry.grid(row=5,column=1,padx=20, pady=20)
+                    password_label.grid(row=6,column=0,padx=20, pady=20)
+                    password_entry.grid(row=6,column=1,padx=20, pady=20)
+                else:
+                    username_label.grid_forget()
+                    username_entry.grid_forget()
+                    password_label.grid_forget()
+                    password_entry.grid_forget()
+            except:
+                pass
+        while True:
+            threading.Thread(target=thread, daemon=True).start()
+            time.sleep(0.1)
+    username_label=ttk.Label(proxy_tab,text="Username:")
+    username_entry=ttk.Entry(proxy_tab,width=30)
+    password_label=ttk.Label(proxy_tab,text="Password:")
+    password_entry=ttk.Entry(proxy_tab,width=30,show="*")
+    threading.Thread(target=uspa, daemon=True).start()
     load_theme()
 
 
@@ -694,7 +733,7 @@ def on_closing():
 #GUI
 if __name__ == "__main__" and block_features.block_start():
     #启动laugh = True
-    if(datetime.datetime.now()>=datetime.datetime(2025,3,13)):
+    if(datetime.datetime.now()>=datetime.datetime(2025,5,2)):
         messagebox.showerror("Error","You can not open python_tool:exitcode(0x1)")
         exit(1)
     elif(datetime.datetime.now()>=datetime.datetime(2025,3,1)):
