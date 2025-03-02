@@ -1,11 +1,26 @@
 import re
 from pmath import sort
-import hashlib
-from key import get_key
 import base64
 import sys
+import hashlib
 r=r'pyquick\d.+[a-z]+..b\d+'
-sys.set_int_max_str_digits(9999999)
+sys.set_int_max_str_digits(999999999)
+def decode_key(key:str):
+    try:
+        key2=key.split("pyquick")[-1]
+        key3=key2.split("..b")[0].encode()
+        base=key2.split("..b")[1]
+        
+        if(int(base)==16):
+            key4=base64.b16decode(key3).decode()
+        elif(int(base)==64):
+            key4=base64.b64decode(key3).decode()
+        elif(int(base)==85):
+            key4=base64.b85decode(key3).decode()
+        keyz="pyquick"+key4+"..b"+base
+        return str(keyz)
+    except:
+        return key
 def check_key(key):
     if re.match(r,key)!=None:
         return True
@@ -27,6 +42,7 @@ def sort_key(key):
         return []
 #将其拆分a,b两组,两组数个数相同.
 def get_number(key):
+    
     nums=sort_key(key)
     if len(nums)>0:
         if(len(nums)%2==1):
@@ -54,39 +70,29 @@ def get_number(key):
         return str(result3)
     else:
         return False
-#对后面的字母进行检查,与第3,12,16,19,22,24,25,26位进行对照(前8位)(1->a,2->b,以此类推)如果没有字母(或有字母但<=16),就直接返回"",如果有,去掉a,z即可,前8位是校验字母,无实际意义
+#对后面的字母进行检查,与第3,12,16位进行对照(前4位)(1->a,2->b,以此类推)如果没有字母(或有字母但<=16),就直接返回"",如果有,去掉a,z即可,前8位是校验字母,无实际意义
 def get_letter(key):
+    
     num=get_number(key)
     zm=str(str(key).split(".")[-3])
+    #print(zm)
     if(len(zm)<16):
         return False
     if len(num)>26 and len(zm)>16:
         ch1=ord(zm[0])
         ch2=ord(zm[1])
         ch3=ord(zm[2])
-        ch4=ord(zm[3])
-        ch5=ord(zm[4])
-        ch6=ord(zm[5])
-        ch7=ord(zm[6])
-        ch8=ord(zm[7])
+        #ch4=ord(zm[3])
         if int(num[2])!=ch1-97:
             return False
         if int(num[12-1])!=ch2-97:
             return False
         if int(num[16-1])!=ch3-97:
             return False
-        if int(num[19-1])!=ch4-97:
-            return False
-        if int(num[22-1])!=ch5-97:
-            return False
-        if int(num[24-1])!=ch6-97:
-            return False
-        if int(num[25-1])!=ch7-97:
-            return False
-        if int(num[26-1])!=ch8-97:
-            return False
+        #if int(num[19-1])!=ch4-97:
+            #return False
         zm2=""
-        for i in zm[8:]:
+        for i in zm[3:]:
             if i=="a" or i=="z":
                 continue
             else:
@@ -94,27 +100,19 @@ def get_letter(key):
         return zm2
     else:
         return False
-def get_base(key):
-    bas=str(key).split(".")[-1].split("..b")[1]
-    bas=int(bas)
-    return bas
-def check_key_available(key):
-    keyy="pyquick"
+def key_hash(key):
     if check_key(key):
         if get_number(key)!=False:
-            keyy+=get_number(key)[:14]
-            if get_letter(key)!=False:
-                bas=get_base(key)
-                if bas==16:
-                    decode_letter=base64.b16decode(get_letter(key)).decode('utf-8')
-                if bas==64:
-                    decode_letter=base64.b64decode(get_letter(key)).decode('utf-8')
-                if bas==85:
-                    decode_letter=base64.b85decode(get_letter(key)).decode('utf-8')
-                keyy+=decode_letter
-        #对keyy进行sha512加密
-        kry=keyy
-        keyy=hashlib.sha512(keyy.encode('utf-8')).hexdigest()
-        return keyy
+            num=get_number(key)
+        else:
+            return False
+        if get_letter(key)!=False:
+            letter=get_letter(key)
+        else:
+            return False
+        result="pyquick"+str(num)+letter
+        result=result.encode()
+        result=hashlib.sha512(result).hexdigest()
+        return result
     else:
         return False
