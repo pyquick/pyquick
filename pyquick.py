@@ -45,7 +45,7 @@ PIP_MIRRORS = [
     "https://pypi.mirrors.ustc.edu.cn/simple",
     "https://pypi.doubanio.com/simple",
     "https://pypi.hustunique.com/simple",
-    "https://pypi.sdutlinux.org/simple",dddddddddde
+    "https://pypi.sdutlinux.org/simple",
     "https://mirrors.cloud.tencent.com/pypi/simple",
     "https://mirrors.sustech.edu.cn/pypi/web/simple",
     "https://mirrors.ustc.edu.cn/pypi/web/simple",
