@@ -1359,6 +1359,9 @@ def settings():
     #global select_python_version_combobox, python_download_mirror, allow_thread_combobox, switch, themes, python_version
     with open(os.path.join(config_path, "windowopenorclose.txt"), "w") as w: 
         w.write("open")
+    def get_pip_mirror():
+        """获取pip镜像源"""
+        """这些星期三完成，启动时读取pip镜像源设置"""
     def set_pip_mirror():
         def thread():
             """设置pip镜像源""" 
