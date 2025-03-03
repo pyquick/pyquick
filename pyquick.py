@@ -50,11 +50,12 @@ PIP_MIRRORS = [
     "https://mirrors.sustech.edu.cn/pypi/web/simple",
     "https://mirrors.ustc.edu.cn/pypi/web/simple",
 ]
+def thread():
+    versions_base=subprocess.run(["where","python"],text=True,creationflags=subprocess.CREATE_NO_WINDOW,capture_output=True,shell=True)
+    with open(os.path.join(config_path, "pythonpath.txt"), "w") as f:
+        f.write(versions_base.stdout.strip("\r"))
 def save_path():
-    def thread():
-        versions_base=subprocess.Popen(["where","python"],text=True,creationflags=subprocess.CREATE_NO_WINDOW)
-        with open(os.path.join(config_path, "pythonpath.txt"), "w") as f:
-            f.write(versions_base.stdout.strip("\r"))
+    
     while True:
        p=multiprocessing.Process(target=thread)
        p.start()
@@ -1501,7 +1502,9 @@ def settings():
     pip_mirror=read_pip_mirror()
     w=tk.Toplevel(root)
     w.title("Settings")
+    w.grab_set()
     w.resizable(False, False)
+    w.attributes('-topmost', True)
     icon_path = os.path.join(MY_PATH, 'pyquick.ico')
     if os.path.exists(icon_path):
         w.iconbitmap(icon_path)
@@ -1584,6 +1587,7 @@ if __name__ == "__main__":
         messagebox.showinfo("Advice","Upgrade to Windows 11 for a better experience.(Windows 11 supports sv_ttk FULLY!)")
     root = tk.Tk()
     root.title("PyQuick")
+    root.attributes('-topmost', True)
     root.resizable(False, False)
     icon_path = os.path.join(MY_PATH, 'pyquick.ico')
     
