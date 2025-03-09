@@ -615,7 +615,7 @@ def load_theme():
 #GUI
 
 root = tk.Tk()
-root.title("Python Tool")
+root.title("Python_Tool(BETA,1103)")
 
 #TAB CONTROL
 tab_control = ttk.Notebook(root)
