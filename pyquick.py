@@ -563,10 +563,10 @@ def uninstall_package():
 
 def show_about():
     time_lim=(datetime.datetime(2025,5,2)-datetime.datetime.now()).days
-    if (datetime.datetime.now()>=datetime.datetime(2025,3,1)):
-        messagebox.showwarning("About", f"Version: dev\nBuild: 1960\n{time_lim} days left.")
+    if (datetime.datetime.now()>=datetime.datetime(2025,4,1)):
+        messagebox.showwarning("About", f"Version: dev\nBuild: 1962\n{time_lim} days left.")
     else:
-        messagebox.showinfo("About", f"Version: dev\nBuild: 1960\n{time_lim} days left.")
+        messagebox.showinfo("About", f"Version: dev\nBuild: 1962\n{time_lim} days left.")
 def load_theme():
     if block_features.block_theme():
         try:
@@ -734,7 +734,7 @@ if __name__ == "__main__" and block_features.block_start():
     if(datetime.datetime.now()>=datetime.datetime(2025,5,2)):
         messagebox.showerror("Error","You can not open python_tool:exitcode(0x1)")
         exit(1)
-    elif(datetime.datetime.now()>=datetime.datetime(2025,3,1)):
+    elif(datetime.datetime.now()>=datetime.datetime(2025,4,1)):
         messagebox.showwarning("up","Will cannot open on 2025,5.2")
     
     root = tk.Tk()
