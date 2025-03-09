@@ -236,8 +236,6 @@ def enable_download():
         version_reload.config(state="normal")
     select_button.config(state="normal")
     cancel_download_button.grid_forget()
-    
-
 
 def download_file(selected_version, destination_path, num_threads):
     """下载指定版本的Python安装程序"""
