@@ -12,8 +12,8 @@ class Window(FluentWindow):
 
         # 创建子界面，实际使用时将 Widget 换成自己的子界面
 
-        self.settingInterface = launch_in.Widget('Setting Interface', self)
-        self.albumInterface = launch_in.Widget('Album Interface', self)
+        self.settingInterface = launch_in.pyquick_widget(self)
+        self.albumInterface = launch_in.setting_widget(self)
 
 
         self.initNavigation()
@@ -21,7 +21,6 @@ class Window(FluentWindow):
 
     def initNavigation(self):
         self.addSubInterface(self.albumInterface, FIF.ALBUM, 'Albums', NavigationItemPosition.SCROLL)
-        self.addSubInterface(self.albumInterface1, FIF.ALBUM, 'Album 1', parent=self.albumInterface)
         self.addSubInterface(self.settingInterface, FIF.SETTING, 'Settings', NavigationItemPosition.BOTTOM)
     def initWindow(self):
         self.resize(900, 700)
