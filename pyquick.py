@@ -16,9 +16,37 @@ import sv_ttk
 import urllib3
 from bs4 import BeautifulSoup
 import urllib3
+import getpass
 import platform
 requests.packages.urllib3.disable_warnings()
+#allowthread.txt 记录是否允许多线程下载
+#allowupdatepip.txt 记录是否允许自动更新
+#pythonpath.txt 记录python安装路径
+#pythonversion.txt 记录python版本
+#theme.txt 记录主题
+#pipmirror.txt 记录pip镜像源
+#pipversion.txt 记录pip版本
+#version.txt 记录python版本
+#windowopenorclose.txt 记录窗口是否打开
+# 获取当前工作目录
+MY_PATH = os.getcwd()
+version_pyquick="2008"
+# 获取用户配置目录
+config_path_base = os.path.join(os.environ["APPDATA"], f"pyquick")
+config_path=os.path.join(config_path_base,version_pyquick)
 processes=[]
+pip_souc=os.path.join(os.environ["APPDATA"], f"pip","pip.ini")
+def get_pip_mirror():
+    pip_souc = os.path.join(os.environ["APPDATA"], f"pip", "pip.ini")
+    with open(pip_souc, "r") as f:
+        pip_config = f.readlines()
+    for line in range(len(pip_config)):
+        pip_config[line] = pip_config[line].strip("\n\r")
+        if "index-url" in pip_config[line]:
+            pip_mirror = pip_config[line].split("=")[1].strip()
+            break
+    return pip_mirror
+
 def get_python_version():
     """获取当前Python版本"""
     all_versions=[]
@@ -56,6 +84,7 @@ def save_path():
     while True:
        p=multiprocessing.Process(target=thread)
        p.start()
+       p.join()
        time.sleep(0.3)
 def allow_thread():
     def thread():
@@ -131,14 +160,7 @@ PYTHON_MIRRORS=[
 ssl.create_default_context=ssl._create_unverified_context()
 # 禁用 SSL 警告
 urllib3.disable_warnings()
-# 获取当前工作目录
-MY_PATH = os.getcwd()
-aa=os.path.join(MY_PATH,os.path.basename(__file__))
-bb=os.path.basename(__file__).split(".")[0]
-version_pyquick="2004"
-# 获取用户配置目录
-config_path_base = os.path.join(os.environ["APPDATA"], f"pyquick")
-config_path=os.path.join(config_path_base,version_pyquick)
+
 if not os.path.exists(config_path):
     os.makedirs(config_path)
 if not os.path.exists(os.path.join(config_path,"pythonmirror.txt")):
@@ -681,7 +703,7 @@ def show_pip_version():
     with open(os.path.join(config_path, "allowupdatepip.txt"), "w")as fw:
         fw.write("True")
         fw.write("\n")
-    
+
     def thread():
         pip_upgrade_button.config(text="Checking...",state="disabled")
         try:
@@ -1356,33 +1378,33 @@ def settings():
     #global select_python_version_combobox, python_download_mirror, allow_thread_combobox, switch, themes, python_version
     with open(os.path.join(config_path, "windowopenorclose.txt"), "w") as w: 
         w.write("open")
-    def get_pip_mirror():
-        """获取pip镜像源"""
-        """这些星期三完成，启动时读取pip镜像源设置"""
     def set_pip_mirror():
         def thread():
-            """设置pip镜像源""" 
-            if pip_mirror_combobox.get()!="" or pip_mirror_combobox.get()!=None:
-                try:
-                    with open(os.path.join(os.path.join(config_path,"pythonversion.txt")),"r") as f:
-                        version_pip=f.readlines()[-1].strip("\n")
-                except:
-                    version_pip=""
-                
-                if version_pip=="":
-                    return None
-                version_p=list(version_pip)
-                if "Pip3" in version_pip:
-                    if len(version_p)==5:
-                        version="3."+version_p[-1]
-                    else:
-                        version="3."+version_p[-2]+version_p[-1]
-                if "Pip2" in version_pip:
-                    version="2."+version_p[-1]
-                try:
-                    subprocess.run([f"pip{version}.exe", "config", "set","global.index-url",pip_mirror_combobox.get()], creationflags=subprocess.CREATE_NO_WINDOW, text=True, capture_output=True,shell=True)
-                except:
-                    pass
+            """设置pip镜像源"""
+            try:
+                if pip_mirror_combobox.get()!="" or pip_mirror_combobox.get()!=None:
+                    try:
+                        with open(os.path.join(os.path.join(config_path,"pythonversion.txt")),"r") as f:
+                            version_pip=f.readlines()[-1].strip("\n")
+                    except:
+                        version_pip=""
+
+                    if version_pip=="":
+                        return None
+                    version_p=list(version_pip)
+                    if "Pip3" in version_pip:
+                        if len(version_p)==5:
+                            version="3."+version_p[-1]
+                        else:
+                            version="3."+version_p[-2]+version_p[-1]
+                    if "Pip2" in version_pip:
+                        version="2."+version_p[-1]
+                    try:
+                        subprocess.run([f"pip{version}.exe", "config", "set","global.index-url",pip_mirror_combobox.get()], creationflags=subprocess.CREATE_NO_WINDOW, text=True, capture_output=True,shell=True)
+                    except:
+                        pass
+            except:
+                pass
         while True:
             with open(os.path.join(config_path, "windowopenorclose.txt"), "r") as r:
                 aa=r.readline()
@@ -1485,21 +1507,12 @@ def settings():
                     return 0
         else:
             return 0
-    def read_pip_mirror():
-        if os.path.exists(os.path.join(config_path, "pipmirror.txt")):
-            with open(os.path.join(config_path, "pipmirror.txt"), "r") as r:
-                aa=r.readlines()
-                if len(aa)>0:
-                    b=aa[len(aa)-1].strip("\n")
-                    for i in range(len(PIP_MIRRORS)):
-                        if b==PIP_MIRRORS[i]:
-                            return i
-                else:
-                    return 0
-        else:
-            return 0
     py_ver=read_py_ver()
-    pip_mirror=read_pip_mirror()
+    pip_mirror =get_pip_mirror()
+    for i in range(len(PIP_MIRRORS)):
+        if pip_mirror==PIP_MIRRORS[i]:
+            pip_mirror=i
+            break
     w=tk.Toplevel(root)
     w.title("Settings")
     w.grab_set()
@@ -1566,6 +1579,7 @@ def settings():
     threading.Thread(target=save_settings, daemon=True).start()
     threading.Thread(target=open_close, daemon=True).start()
     threading.Thread(target=set_pip_mirror,daemon=True).start()
+    #multiprocessing.Process(target=get_pip_mirror,daemon=True).start()
     w.mainloop()
 
 
@@ -1725,4 +1739,5 @@ if __name__ == "__main__":
     threading.Thread(target=allow_thread, daemon=True).start()
     threading.Thread(target=show_pip_version, daemon=True).start()
     multiprocessing.Process(target=save_path).start()
+    get_pip_mirror()
     root.mainloop()

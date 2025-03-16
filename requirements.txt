@@ -5,5 +5,5 @@ nuitka
 lxml
 beautifulsoup4
 PyQt5
-PyQt-Fluent-Widgets[full]
+PyQt6-Fluent-Widgets[full]
 urllib3
