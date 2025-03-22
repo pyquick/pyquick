@@ -16,7 +16,7 @@ def get_system_build():
 build=get_system_build()
 VERSIONS = [
     "3.13.0","3.13.1","3.13.2",
-    "3.12.0","3.12.1","3.12.2","3.12.3","3.12.4","3.12.5","3.12.6","3.12.7","3.12.8",
+    "3.12.0","3.12.1","3.12.2","3.12.3","3.12.4","3.12.5","3.12.6","3.12.7","3.12.8","3.12.9",
     "3.11.0","3.11.1","3.11.2","3.11.3","3.11.4","3.11.5","3.11.6","3.11.7","3.11.8","3.11.9",
     "3.10.0","3.10.1","3.10.2","3.10.3","3.10.4","3.10.5","3.10.6","3.10.7","3.10.8","3.10.9","3.10.10","3.10.11",
     "3.9.0","3.9.1","3.9.2","3.9.3","3.9.4","3.9.5","3.9.6","3.9.7","3.9.8","3.9.9",
@@ -30,7 +30,7 @@ VERSIONS = [
 requests.packages.urllib3.disable_warnings()
 
 # 获取当前工作目录
-config_path = os.path.join(os.environ["APPDATA"], f"pyquick","1104.1")
+config_path = os.path.join(os.environ["APPDATA"], f"pyquick","1105")
 
 # 如果保存目录不存在，则创建它
 if not os.path.exists(config_path):
@@ -366,19 +366,8 @@ def load_theme():
     except Exception:
         sv_ttk.set_theme("light")
 
-
-# 检查更新
-def update():
-    r = requests.get("https://githubtohaoyangli.github.io/info/info.json")
-    ver = r.json()["releases"]["release1"]["version"]
-    myver = "1.1.0"
-    if int(ver) > int(myver):
-        pass
-
-
 def about():
-    messagebox.showinfo(title="About", message="Python_tool 1.1\nbuild:1104.1(BETA)\n")
-
+    messagebox.showinfo(title="About", message="Python_tool 1.1.0\nbuild:1105")
 
 # 创建主窗口
 root = tk.Tk()
