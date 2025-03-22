@@ -201,13 +201,13 @@ if not os.path.exists(os.path.join(config_path, "theme.txt")):
 
 def show_about():
     """显示关于对话框"""
-    if datetime.datetime.now() >= datetime.datetime(2025, 2, 4):
-        time_lim = (datetime.datetime(2025, 4, 13) - datetime.datetime.now()).days
+    if datetime.datetime.now() >= datetime.datetime(2025, 6, 1):
+        time_lim = (datetime.datetime(2025, 7, 13) - datetime.datetime.now()).days
         messagebox.showwarning("About",
-                               f"Version: Pyquick Magic dev\nBuild: 2004\nExpiration time:2025/4/13\n only {time_lim} days left.")
+                               f"Version: Pyquick Magic dev\nBuild: 2008\nExpiration time:2025/4/13\n only {time_lim} days left.")
     else:
-        time_lim = (datetime.datetime(2025, 4, 13) - datetime.datetime.now()).days
-        messagebox.showinfo("About", f"Version: Pyquick Magic dev\nBuild: 2004\nExpiration time:2025/4/13\n{time_lim} days left.")
+        time_lim = (datetime.datetime(2025, 7, 13) - datetime.datetime.now()).days
+        messagebox.showinfo("About", f"Version: Pyquick Magic dev\nBuild: 2008\nExpiration time:2025/4/13\n{time_lim} days left.")
 
 
 # 全局变量
@@ -998,9 +998,9 @@ def install_package():
             #PyQt5_sip12.16.1(14)
             
             
-            find_packages=subprocess.run([f"pip{version}.exe", "show",package_name], text=True,capture_output=True,
+            find_packages=subprocess.run([f"pip{version}.exe","show",package_name], text=True,capture_output=True,
                                                         creationflags=subprocess.CREATE_NO_WINDOW)
-            if f"Name: {package_name}" in find_packages.stdout:
+            if f"Name: " in find_packages.stdout:
                 pip_progress_bar.stop()
                 pip_progress_bar.grid_forget()
                 package_status_label.config(text=f"Package '{package_name}' is already installed.")

@@ -1,11 +1,11 @@
 import subprocess
 import sys
 import os
-from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QIcon
-from PyQt5.QtWidgets import QFrame, QHBoxLayout, QApplication, QVBoxLayout
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QIcon
+from PyQt6.QtWidgets import QFrame, QHBoxLayout, QApplication, QVBoxLayout
 from qfluentwidgets import FluentIcon as FIF
-from qfluentwidgets import NavigationItemPosition, FluentWindow, SubtitleLabel, setFont, LineEdit, PushButton
+from qfluentwidgets import NavigationItemPosition, FluentWindow, SubtitleLabel, setFont, PushButton
 config_path=os.path.join(os.environ["APPDATA"], f"pyquick","launcher")
 MY_PATH = os.getcwd()
 if not os.path.exists(config_path):
@@ -17,8 +17,8 @@ class Widget(QFrame):
         self.label = SubtitleLabel(text, self)
         self.hBoxLayout = QHBoxLayout(self)
         setFont(self.label, 28)
-        self.label.setAlignment(Qt.AlignCenter)
-        self.hBoxLayout.addWidget(self.label, 1, Qt.AlignCenter)
+        self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.hBoxLayout.addWidget(self.label, 1, Qt.AlignmentFlag.AlignCenter)
 
         # 必须给子界面设置全局唯一的对象名
         self.setObjectName(text.replace(' ', '-'))
@@ -41,7 +41,7 @@ class start_pyquick(QFrame):
         self.start_botton.clicked.connect(self.start)
 
         # self.hBoxLayout.addWidget(self.filepath, 1, Qt.AlignCenter)
-        self.hBoxLayout.addWidget(self.start_botton, 2, Qt.AlignCenter)
+        self.hBoxLayout.addWidget(self.start_botton, 2, Qt.AlignmentFlag.AlignCenter)
         self.setObjectName(text.replace(' ', '-'))
 
 
