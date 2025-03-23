@@ -168,8 +168,13 @@ def validate_version(version):
 
 def download_file(selected_version, destination_path, num_threads):
     """下载指定版本的Python安装程序"""
-    global file_size, executor, futures, downloaded_bytes, is_downloading, destination, url
-    
+    global file_size, executor, futures, downloaded_bytes, is_downloading, destination, url,lock
+    # 计算每个线程下载的数据块大小
+    chunk_size = file_size // num_threads
+    lock = threading.Lock()
+    futures = []
+    downloaded_bytes = [0]
+    is_downloading = True
     # 设置进度条为不定式模式
     download_pb.config(mode="indeterminate")
     download_pb.start()
@@ -221,11 +226,7 @@ def download_file(selected_version, destination_path, num_threads):
         enable_download()
 
 
-    # 计算每个线程下载的数据块大小
-    chunk_size = file_size // num_threads
-    futures = []
-    downloaded_bytes = [0]
-    is_downloading = True
+
 
     # 使用线程池执行下载任务
     with ThreadPoolExecutor(max_workers=num_threads) as executor:
@@ -272,9 +273,6 @@ def download_chunk(url, start_byte, end_byte, destination, retries=5):
                 response.raise_for_status()
                 # 写入文件
                 with lock:
-                    # 在发起请求后增加
-                    global file_size
-                    file_size = int(response.headers.get('Content-Length', 0))  # 确保获取真实文件大小
                     with open(destination, 'r+b') as f:
                         f.seek(start_byte)
                         for chunk in response.iter_content(chunk_size=8192):
@@ -307,26 +305,25 @@ def update_progress():
     while any(not future.done() for future in futures):
         if not is_downloading:
             break
+        with lock:
+            current_bytes = downloaded_bytes[0]
         cancel_download_button.grid(row=5, column=0, columnspan=3, pady=20, padx=20)
-        progress = float(downloaded_bytes[0] / file_size * 100) if file_size != 0 else 0  # 保留3位小数
+        progress = float(current_bytes / file_size * 100) if file_size != 0 else 0  # 保留3位小数
         download_pb['value'] = progress
         download_pb.update()  # 确保进度条及时更新
         # 计算下载速度
-        elapsed_time = time.time() - start_time
-        if elapsed_time > 0:
-            current_speed = (downloaded_bytes[0] - last_bytes) / elapsed_time  # 当前速度
-            last_bytes = downloaded_bytes[0]
-            speed_text = f"{current_speed / 1024:.2f} KB/s" if current_speed < 1024 * 1024 else f"{current_speed / (1024 * 1024):.2f} MB/s"
-        else:
-            current_speed = 0
-            speed_text = "0 KB/s"
-        
-        # 更新状态标签，显示进度和速度
-        status_label.config(text=f"Downloading: {progress:.3f}% ({speed_text})")  # 保留3位小数
-        status_label.update()  # 确保状态标签及时更新
-        
-        # 每100ms更新一次进度
-        time.sleep(0.1)
+        elapsed = time.time() - start_time
+        speed = (current_bytes - last_bytes) / elapsed if elapsed > 0 else 0
+
+        # 更新速度显示
+        speed_kb = speed / 1024
+        speed_text = f"{speed_kb:.2f} KB/s" if speed_kb < 1024 else f"{speed_kb / 1024:.2f} MB/s"
+
+        status_label.config(text=f"Downloading: {progress:.3f}% ({speed_text})")
+
+        last_bytes = current_bytes
+        start_time = time.time()  # 重置计时器
+        time.sleep(0.2)  # 降低更新频率避免闪烁
         
     if is_downloading:
         download_pb['value'] = 100
