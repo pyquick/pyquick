@@ -3,7 +3,10 @@ from tkinter import ttk, filedialog,messagebox
 import subprocess
 import os
 import threading
+from xml.sax.handler import property_xml_string
+from cryptography.fernet import Fernet
 import requests
+import proxy
 from get_system_build import block_features
 import darkdetect
 import re
@@ -15,9 +18,9 @@ import logging
 import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from bs4 import BeautifulSoup
-config_path=create_folder.get_path("pyquick","1960")
+config_path=create_folder.get_path("pyquick","1965")
 cancel_event = threading.Event()
-create_folder.folder_create("pyquick","1960")
+create_folder.folder_create("pyquick","1965")
 def python_version_reload():
     global is_reloading
     def thread():
@@ -162,55 +165,205 @@ def validate_version(version):
     if re.match(patten2,version):
         return True
     return bool(re.match(pattern, version))
-def download_chunk(url, start_byte, end_byte, destination, retries=3):
-    """
-    下载文件的指定部分
 
-    :param url: 文件的URL
-    :param start_byte: 开始下载的字节位置
-    :param end_byte: 结束下载的字节位置
-    :param destination: 文件保存的目标路径
-    :param retries: 最大重试次数,默认为3次
-    :return: 如果下载成功返回True,否则返回False
-    """
-   
+def download_file(selected_version, destination_path, num_threads):
+    """下载指定版本的Python安装程序"""
+    global file_size, executor, futures, downloaded_bytes, is_downloading, destination, url
+    
+    # 设置进度条为不定式模式
+    download_pb.config(mode="indeterminate")
+    download_pb.start()
+    # 验证目标路径是否有效
+    if not validate_path(destination_path):
+        status_label.config(text="Invalid destination path")
+        download_pb.stop()
+        download_pb.config(mode="determinate")
+        download_pb['value'] = 0
+        enable_download()
+
+
+    # 构造文件名和目标路径
+    file_name = choose_file_combobox.get()
+    destination = os.path.join(destination_path, file_name)
+
+    url = f"https://www.python.org/ftp/python/{selected_version}/{file_name}"
+
+    # 获取文件大小
+    try:
+        # 获取代理设置
+        proxy_settings = None
+        if proxy.proxy_check_status(1965):
+            result = proxy.read_proxy(1965)
+            username = result['username'] if proxy.password_check_status(1965) else None
+            password = result['password'] if proxy.password_check_status(1965) else None
+            proxy_settings = proxy.proxy_address(result['address'], result['port'], username, password, result['key'].encode())
+
+        response = requests.head(url, timeout=10, verify=False, proxies=proxy_settings)
+        response.raise_for_status()
+        file_size = int(response.headers['Content-Length'])
+    except requests.RequestException as e:
+        status_label.config(text=f"Failed to get file size: {str(e)}")
+        download_pb.stop()
+        download_pb.config(mode="determinate")
+        download_pb['value'] = 0
+        enable_download()
+
+
+    # 创建目标文件并预分配空间
+    try:
+        with open(destination, 'wb') as f:
+            f.truncate(file_size)
+    except IOError as e:
+        status_label.config(text=f"Failed to create file: {str(e)}")
+        download_pb.stop()
+        download_pb.config(mode="determinate")
+        download_pb['value'] = 0
+        enable_download()
+
+
+    # 计算每个线程下载的数据块大小
+    chunk_size = file_size // num_threads
+    futures = []
+    downloaded_bytes = [0]
+    is_downloading = True
+
+    # 使用线程池执行下载任务
+    with ThreadPoolExecutor(max_workers=num_threads) as executor:
+        for i in range(num_threads):
+            if not is_downloading:
+                break
+            start_byte = i * chunk_size
+            end_byte = start_byte + chunk_size - 1 if i != num_threads - 1 else file_size - 1
+            futures.append(executor.submit(download_chunk, url, start_byte, end_byte, destination))
+
+        # 显示并启用取消下载按钮
+        cancel_download_button.grid(row=5, column=0, columnspan=3, pady=20, padx=20)
+        cancel_download_button.config(state="normal")
+        
+        # 设置进度条为定式模式
+        download_pb.config(mode="determinate")
+        download_pb.stop()
+        download_pb['value'] = 0
+        download_pb['maximum'] = 100
+        
+        # 启动一个线程来更新下载进度
+        threading.Thread(target=update_progress, daemon=True).start()
+
+def download_chunk(url, start_byte, end_byte, destination, retries=5):
+    """下载文件的指定部分"""
     global is_downloading
-    # 构造请求头，指定下载的字节范围
     headers = {'Range': f'bytes={start_byte}-{end_byte}'}
-    attempt = 0
-    # 尝试下载文件，如果失败则重试
-    while attempt < retries:
+    
+    for attempt in range(retries):
         if not is_downloading:
             return False
         try:
-            # 发起HTTP请求，包含自定义请求头，启用流式响应，设置超时
-            response = requests.get(url, headers=headers, stream=True, timeout=10,verify=False)
-            # 检查响应状态码，如果状态码表示错误，则抛出异常
-            response.raise_for_status()
-            # 使用文件锁确保并发安全，打开文件准备写入
-            with lock:
-                with open(destination, 'r+b') as f:
-                    f.seek(start_byte)
-                    # 遍历响应内容，写入到文件中
-                    for chunk in response.iter_content(chunk_size=8192):
-                        if not is_downloading:
-                            return False
-                        f.write(chunk)
-                        downloaded_bytes[0] += len(chunk)
+            # 获取代理设置
+
+            if proxy.proxy_check_status(1965):
+                result = proxy.read_proxy(1965)
+                username = result['username'] if proxy.password_check_status(1965) else None
+                password = result['password'] if proxy.password_check_status(1965) else None
+                proxy_settings = proxy.proxy_address(result['address'], result['port'], username, password, result['key'].encode())
+            else:
+                proxy_settings = None
+            # 发起请求
+            with requests.get(url, headers=headers, stream=True,verify=False, proxies=proxy_settings) as response:
+                response.raise_for_status()
+                # 写入文件
+                with lock:
+                    # 在发起请求后增加
+                    global file_size
+                    file_size = int(response.headers.get('Content-Length', 0))  # 确保获取真实文件大小
+                    with open(destination, 'r+b') as f:
+                        f.seek(start_byte)
+                        for chunk in response.iter_content(chunk_size=8192):
+                            if not is_downloading:
+                                return False
+                            f.write(chunk)
+                            with lock:
+                                downloaded_bytes[0] += len(chunk)
             return True
-        except requests.RequestException as e:
-            # 如果发生网络请求异常，更新状态标签并重试
+                
+        except Exception as e:
+            if attempt < retries - 1:
+                time.sleep(1)
+                continue
             with lock:
-                if is_downloading:
-                    status_label.config(text=f"Download Failed! Retrying... ({attempt + 1}/{retries})")
-                    attempt += 1
-                else:
-                    return False
-    # 如果重试次数用尽仍然失败，更新状态标签并设置下载状态为False
-    with lock:
-        status_label.config(text=f"Download Failed! Error: {e}")
+                status_label.config(text=f"Download Failed!")
+                is_downloading = False
+                download_pb.stop()
+                download_pb.config(mode="determinate")
+                download_pb['value'] = 0
+            return False
+
+def update_progress():
+    """更新进度条和状态标签"""
+    global file_size, is_downloading
+    
+    start_time = time.time()  # 记录下载开始时间
+    last_bytes = 0  # 记录上一次的下载字节数
+    
+    while any(not future.done() for future in futures):
+        if not is_downloading:
+            break
+        cancel_download_button.grid(row=5, column=0, columnspan=3, pady=20, padx=20)
+        progress = float(downloaded_bytes[0] / file_size * 100) if file_size != 0 else 0  # 保留3位小数
+        download_pb['value'] = progress
+        download_pb.update()  # 确保进度条及时更新
+        # 计算下载速度
+        elapsed_time = time.time() - start_time
+        if elapsed_time > 0:
+            current_speed = (downloaded_bytes[0] - last_bytes) / elapsed_time  # 当前速度
+            last_bytes = downloaded_bytes[0]
+            speed_text = f"{current_speed / 1024:.2f} KB/s" if current_speed < 1024 * 1024 else f"{current_speed / (1024 * 1024):.2f} MB/s"
+        else:
+            current_speed = 0
+            speed_text = "0 KB/s"
+        
+        # 更新状态标签，显示进度和速度
+        status_label.config(text=f"Downloading: {progress:.3f}% ({speed_text})")  # 保留3位小数
+        status_label.update()  # 确保状态标签及时更新
+        
+        # 每100ms更新一次进度
+        time.sleep(0.1)
+        
+    if is_downloading:
+        download_pb['value'] = 100
+        status_label.config(text="Download Complete!")
+        enable_download()
+    else:
+        download_pb['value'] = 0
+        status_label.config(text="Download Cancelled!")
+        enable_download()
+        
+    is_downloading = False
+    cancel_download_button.grid_forget()
+
+def cancel_download():
+    global executor,is_downloading
+    if is_downloading:
+        cancel_event.set()
+        executor.shutdown(wait=False)
         is_downloading = False
-    return False
+        status_label.config(text="Cancelling download...")
+        download_pb['value'] = 0  # 重置进度条
+        cancel_download_button.grid_forget()  # 立即隐藏取消按钮
+        
+        destination_path = destination_entry.get()
+        filename=choose_file_combobox.get()
+        file_name = filename
+        destination = os.path.join(destination_path, file_name)
+        
+        if os.path.exists(destination):
+            os.remove(destination)
+            status_label.config(text="Download cancelled and incomplete file removed.")
+            enable_download()
+        else:
+            status_label.config(text="Download cancelled.")
+            enable_download()
+    root.after(3000, clear_a)
+
 def disable_download():
     version_combobox.config(state="disabled")
     choose_file_combobox.config(state="disabled")
@@ -237,174 +390,6 @@ def enable_download():
     select_button.config(state="normal")
     cancel_download_button.grid_forget()
 
-def download_file(selected_version, destination_path, num_threads):
-    """下载指定版本的Python安装程序"""
-    download_pb.config(mode="indeterminate")
-    download_pb.start(10)
-    cancel_download_button.grid(row=5, column=0, columnspan=3, pady=20, padx=20)
-    cancel_download_button.config(state="disabled")
-    global file_size, executor, futures, downloaded_bytes, is_downloading, destination, url
-    # 验证版本号是否有效
-    if not validate_version(selected_version):
-        status_label.config(text="Invalid version number")
-        enable_download()
-        return
-
-    # 验证目标路径是否有效
-    if not validate_path(destination_path):
-        status_label.config(text="Invalid destination path")
-        enable_download()
-        return
-
-    # 构造文件名和目标路径
-    file_name = choose_file_combobox.get()
-    destination = os.path.join(destination_path, file_name)
-
-    
-        
-    #url = f"{mirror}{selected_version}/{file_name}"
-    url = f"https://www.python.org/ftp/python/{selected_version}/{file_name}"
-
-    # 获取文件大小
-    try:
-        response = requests.head(url, timeout=10,verify=False)
-        response.raise_for_status()
-        file_size = int(response.headers['Content-Length'])
-    except requests.RequestException as e:
-        status_label.config(text=f"Failed to get file size: {str(e)}")
-        enable_download()
-        return
-
-    # 尝试创建目标文件
-    try:
-        with open(destination, 'wb') as f:
-            pass
-    except IOError as e:
-        status_label.config(text=f"Failed to create file: {str(e)}")
-        enable_download()
-        return
-
-    # 计算每个线程下载的数据块大小
-    chunk_size = file_size // num_threads
-    futures = []
-    downloaded_bytes = [0]
-    is_downloading = True
-    max_worker=num_threads
-    # 使用线程池执行下载任务
-    executor = ThreadPoolExecutor(max_workers=max_worker)
-    for i in range(num_threads):
-        if not is_downloading:
-            break
-        start_byte = i * chunk_size
-        end_byte = start_byte + chunk_size - 1 if i != num_threads - 1 else file_size - 1
-
-        def start():
-            futures.append(executor.submit(download_chunk, url, start_byte, end_byte, destination))
-
-        b=threading.Thread(target=start, daemon=True)
-        b.start()
-        b.join()
-    time.sleep(0.2)
-    cancel_download_button.config(state="normal")
-    download_pb.config(mode="determinate")
-    download_pb['value']=0
-    download_pb['maximum']=100
-    # 启动一个线程来更新下载进度
-    a=threading.Thread(target=update_progress, daemon=True)
-    a.start()
-    # 启用取消下载按钮  
-
-
-
-
-def update_progress():
-    """更新进度条和状态标签
-    ib=0
-    通过计算已下载字节数与总文件大小的比例来更新进度条和状态标签的文本。
-    此函数在一个单独的线程中运行，以保持UI响应性。
-    """
-    
-    global file_size, is_downloading, url, ib
-    ib=0
-    download_pb.config(mode="indeterminate")
-    download_pb.start(5)
-    
-    # 当有任何一个下载任务未完成时，继续更新进度
-    while any(not future.done() for future in futures):
-        # 如果下载状态为False，则停止更新进度
-        if not is_downloading:
-            break
-        
-        #time.sleep(0.2)
-        if ib==0:
-            download_pb.stop()
-            download_pb.config(mode="determinate")
-            download_pb["maximum"]=100
-        # 计算并更新下载进度的百分比
-        ib+=1
-        progress = int(downloaded_bytes[0] / file_size * 100)
-        
-        # 将已下载字节数转换为MB
-        downloaded_mb = downloaded_bytes[0] / (1024 * 1024)
-        downloaded_kb=downloaded_bytes[0] / (1024)
-        download_b=downloaded_bytes[0]
-        # 将总文件大小转换为MB
-        total_mb = file_size / (1024 * 1024)
-        total_kb=file_size / (1024)
-        total_b=file_size
-        if total_mb>=1:
-            download_pb['value']=progress
-            status_label.config(text=f"Progress: {progress}% ({downloaded_mb:.2f} MB / {total_mb:.2f} MB)")
-        elif total_kb>=1 and total_mb<1:
-            download_pb['value']=progress
-            status_label.config(text=f"Progress: {progress}% ({downloaded_kb:.2f} KB / {total_kb:.2f} KB)")
-        else:
-            download_pb['value']=progress
-            status_label.config(text=f"Progress: {progress}% ({download_b} Bytes / {total_b} Bytes)")
-        # 更新进度条的值
-        download_pb['value']=progress
-        # 暂停0.1秒，减少UI更新频率
-        time.sleep(0.1)
-        
-    # 如果下载状态为True，则表示下载已完成
-    if is_downloading:
-        download_pb['value']=100
-        status_label.config(text="Download Complete!")
-        enable_download()
-    # 如果下载状态为False，则表示下载已取消
-    else:
-        status_label.config(text="Download Cancelled!")
-        enable_download()
-    # 将下载状态设置为False，表示下载已完成或已取消
-    is_downloading = False
-    # 禁用取消下载按钮，防止用户在下载已完成或已取消的情况下点击按钮
-    cancel_download_button.grid_forget()
-    root.after(5000,clear_a)  
-
-
-def cancel_download():
-    global executor,is_downloading
-    if is_downloading:
-        cancel_event.set()
-        for i in range(1000):
-            executor.shutdown(wait=False)
-            is_downloading=False
-        status_label.config(text="Cancelling download...")
-        download_pb['value'] = 0  # 重置进度条
-        destination_path = destination_entry.get()
-        filename=choose_file_combobox.get()
-        file_name = filename
-        destination = os.path.join(destination_path, file_name)
-        is_downloading = False
-        cancel_download_button.grid_forget()
-    if os.path.exists(destination):
-        os.remove(destination)
-        status_label.config(text="Download cancelled and incomplete file removed.")
-        enable_download()
-    else:
-        status_label.config(text="Download cancelled.")
-        enable_download()
-    root.after(3000, clear_a)
 def sort_results(results: list):
     global is_downloading
     _results = results.copy()
@@ -441,6 +426,7 @@ def download_selected_version():
         return
     disable_download()
     cancel_download_button.config(state="normal")
+    cancel_download_button.grid(row=5, column=0, columnspan=3, pady=20, padx=20)  # 确保取消按钮可见
 
     clear_a()
     root.protocol("WM_DELETE_WINDOW", on_closing)
@@ -591,6 +577,41 @@ def save_theme():
         theme=sv_ttk.get_theme()
         sav_path.save_path(config_path,"theme.txt","w",theme)
 def settings():
+
+    def save_proxy():
+        import proxy
+        def thread():
+            try:
+                proxy.save_proxy(proxy_entry.get(),port_entry.get(),username_entry.get(),password_entry.get(),1965)
+            except Exception as e:
+                pass
+        while True:
+            try:
+                a=threading.Thread(target=thread, daemon=True)
+                a.start()
+                a.join()
+                time.sleep(0.2)
+            except:
+                pass
+    def read_proxy():
+        import proxy
+        def thread():
+            try:
+                result=proxy.read_proxy(1965)
+                if result["address"]!=None:
+                    proxy_entry.insert(0,result["address"])
+                if result["port"]!=None:
+                    port_entry.insert(0,result["port"])
+                if result["username"]!=None and result["username"]!="":
+                    username_entry.insert(0,result["username"])
+                if result["password"]!=None and result["password"]!="":
+                    password_entry.insert(0,result["password"])
+            except Exception as e:
+                print("Error reading proxy: ",str(e))
+        a=threading.Thread(target=thread, daemon=True)
+        a.start()
+        a.join()
+
     def load_theme():
         if block_features.block_theme():
             try:
@@ -632,7 +653,58 @@ def settings():
             else:
                 sv_ttk.set_theme("light")
                 sav_path.save_path(config_path,"theme.txt","w","light")
-    
+    def enable_k():
+        proxy_label.grid(row=1, column=0, padx=20, pady=20)
+        proxy_entry.grid(row=1, column=1, padx=20, pady=20)
+        port_label.grid(row=2, column=0, padx=20, pady=20)
+        port_entry.grid(row=2, column=1, padx=20, pady=20)
+        checkuser.grid(row=5, column=0, columnspan=2, padx=20, pady=20)
+        if user.get():
+            username_label.grid(row=6, column=0, padx=20, pady=20)
+            username_entry.grid(row=6, column=1, padx=20, pady=20)
+            password_label.grid(row=7, column=0, padx=20, pady=20)
+            password_entry.grid(row=7, column=1, padx=20, pady=20)
+
+    def disable_k():
+        proxy_label.grid_forget()
+        proxy_entry.grid_forget()
+        port_label.grid_forget()
+        port_entry.grid_forget()
+        checkuser.grid_forget()
+        username_label.grid_forget()
+        username_entry.grid_forget()
+        password_label.grid_forget()
+        password_entry.grid_forget()
+    def check_proxy_status():
+        import proxy
+        try:
+            result=proxy.proxy_check_status(1965)
+            if result==True:
+                enabled.set(True)
+                enable_k()
+            else:
+                enabled.set(False)
+                disable_k()
+        except Exception:
+            enabled.set(False)
+            disable_k()
+    def set_proxy_status():
+        import proxy
+        def thread():
+            try:
+                if enabled.get():
+                    proxy.proxy_set_status(True,1965)
+                    enable_k()
+                else:
+                    proxy.proxy_set_status(False,1965)
+                    disable_k()
+            except Exception:
+                pass
+        while True:
+            a=threading.Thread(target=thread, daemon=True)
+            a.start()
+            a.join()
+            time.sleep(0.2)
     window=tk.Toplevel(root)
     window.title("Settings")
     window.resizable(False,False)
@@ -655,55 +727,49 @@ def settings():
         switch=tk.BooleanVar()
         sw_theme=ttk.Checkbutton(theme_tab,text="Switch Theme",variable=switch,command=switch_theme,style="Switch.TCheckbutton")
         sw_theme.grid(row=0,column=0,padx=20, pady=20)
-
+    enabled=tk.BooleanVar()
+    check=ttk.Checkbutton(proxy_tab,text="Enable Proxy",variable=enabled,style="Switch.TCheckbutton")
+    check.grid(row=0,column=0,columnspan=2,padx=20, pady=20)
     # Proxy
-    proxy_label=ttk.Label(proxy_tab,text="HTTP Proxy:")
-    proxy_label.grid(row=0,column=0,padx=20, pady=20)
+    proxy_label=ttk.Label(proxy_tab,text="HTTP(S) Proxy:")
+    #proxy_label.grid(row=1,column=0,padx=20, pady=20)
     proxy_entry=ttk.Entry(proxy_tab,width=30)
-    proxy_entry.grid(row=0,column=1,padx=20, pady=20)
+    #proxy_entry.grid(row=1,column=1,padx=20, pady=20)
 
     port_label=ttk.Label(proxy_tab,text="Port:")
-    port_label.grid(row=1,column=0,padx=20, pady=20)
+    #port_label.grid(row=2,column=0,padx=20, pady=20)
     port_entry=ttk.Entry(proxy_tab,width=10)
-    port_entry.grid(row=1,column=1,padx=20, pady=20)
-
-    proxys_label=ttk.Label(proxy_tab,text="HTTPS Proxy:")
-    proxys_label.grid(row=2,column=0,padx=20, pady=20)
-    proxys_entry=ttk.Entry(proxy_tab,width=30)
-    proxys_entry.grid(row=2,column=1,padx=20, pady=20)
-
-    ports_label=ttk.Label(proxy_tab,text="Port:")
-    ports_label.grid(row=3,column=0,padx=20, pady=20)
-    ports_entry=ttk.Entry(proxy_tab,width=10)
-    ports_entry.grid(row=3,column=1,padx=20, pady=20)
-
-    user=tk.BooleanVar()
-    checkuser=ttk.Checkbutton(proxy_tab,text="Proxy needs username and password",variable=user,style="Switch.TCheckbutton")
-    checkuser.grid(row=4,column=0,columnspan=2,padx=20, pady=20)
+    #port_entry.grid(row=2,column=1,padx=20, pady=20)
     def uspa():
-        def thread():
-            try:
-                a=user.get()
-                if a:
-                    username_label.grid(row=5,column=0,padx=20, pady=20)
-                    username_entry.grid(row=5,column=1,padx=20, pady=20)
-                    password_label.grid(row=6,column=0,padx=20, pady=20)
-                    password_entry.grid(row=6,column=1,padx=20, pady=20)
-                else:
-                    username_label.grid_forget()
-                    username_entry.grid_forget()
-                    password_label.grid_forget()
-                    password_entry.grid_forget()
-            except:
-                pass
-        while True:
-            threading.Thread(target=thread, daemon=True).start()
-            time.sleep(0.1)
+        import proxy
+        try:
+            a=user.get()
+            if a and enabled.get():
+                proxy.password_set_status(True,1965)
+                username_label.grid(row=6,column=0,padx=20, pady=20)
+                username_entry.grid(row=6,column=1,padx=20, pady=20)
+                password_label.grid(row=7,column=0,padx=20, pady=20)
+                password_entry.grid(row=7,column=1,padx=20, pady=20)
+            else:
+                proxy.password_set_status(False,1965)
+                username_label.grid_forget()
+                username_entry.grid_forget()
+                password_label.grid_forget()
+                password_entry.grid_forget()
+        except:
+            pass
+    user=tk.BooleanVar()
+    checkuser=ttk.Checkbutton(proxy_tab,text="Proxy needs username and password",variable=user,style="Switch.TCheckbutton",command=uspa)
+    #checkuser.grid(row=5,column=0,columnspan=2,padx=20, pady=20)
+
     username_label=ttk.Label(proxy_tab,text="Username:")
     username_entry=ttk.Entry(proxy_tab,width=30)
     password_label=ttk.Label(proxy_tab,text="Password:")
     password_entry=ttk.Entry(proxy_tab,width=30,show="*")
-    threading.Thread(target=uspa, daemon=True).start()
+    threading.Thread(target=save_proxy, daemon=True).start()
+    threading.Thread(target=read_proxy, daemon=True).start()
+    threading.Thread(target=set_proxy_status, daemon=True).start()
+    check_proxy_status()
     load_theme()
 
 
