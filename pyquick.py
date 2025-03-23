@@ -673,22 +673,8 @@ def show_about():
         messagebox.showinfo("About", f"Version: dev\nBuild: 1927\n{time_lim} days left.")
 #GUI
 if __name__ == "__main__":
-    #启动laugh = True
-    try:
-
-        user_name = getpass.getuser()
-        path=f"/Users/{user_name}/pt_saved/launch/launch.txt"
-        if(os.path.exists(path)):
-            print(path)
-        else:
-            print(path)
-            raise FileNotFoundError
-
-    except FileNotFoundError:
-        messagebox.showerror("ERROR","You can not open python_tool:exitcode(0xB)")
-        exit(0)
-    if(datetime.datetime.now()>=datetime.datetime(2025,3,13)):
-        messagebox.showerror("Error","You can not open python_tool:exitcode(0x1)")
+    if(datetime.datetime.now()>=datetime.datetime(2025,7,13)):
+        messagebox.showerror("Error","This software will not be available after 2025,7,13")
         exit(1)
     elif(datetime.datetime.now()>=datetime.datetime(2025,2,1)):
         messagebox.showwarning("up","Will cannot open on 2025,3,13")
