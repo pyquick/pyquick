@@ -29,6 +29,30 @@ requests.packages.urllib3.disable_warnings()
 #version.txt 记录python版本
 #windowopenorclose.txt 记录窗口是否打开
 # 获取当前工作目录
+PIP_MIRRORS = [
+    "http://pypi.org/simple/",
+    "https://pypi.tuna.tsinghua.edu.cn/simple/",
+    "https://mirrors.aliyun.com/pypi/simple/",
+    "https://pypi.mirrors.ustc.edu.cn/simple",
+    "https://pypi.doubanio.com/simple/",
+    "https://pypi.hustunique.com/simple/",
+    "https://pypi.sdutlinux.org/simple/",
+    "https://mirrors.cloud.tencent.com/pypi/simple/",
+    "https://mirrors.sustech.edu.cn/pypi/web/simple/",
+    "https://mirrors.ustc.edu.cn/pypi/web/simple/",
+]
+TRUSTED=[
+    "pypi.org",
+    "pypi.tuna.tsinghua.edu.cn",
+    "mirrors.aliyun.com",
+    "pypi.mirrors.ustc.edu.cn",
+    "pypi.doubanio.com",
+    "pypi.hustunique.com",
+    "pypi.sdutlinux.org",
+    "mirrors.cloud.tencent.com",
+    "mirrors.sustech.edu.cn",
+    "mirrors.ustc.edu.cn",
+]
 MY_PATH = os.getcwd()
 version_pyquick="2008"
 # 获取用户配置目录
@@ -45,36 +69,30 @@ def get_pip_mirror():
         if "index-url" in pip_config[line]:
             pip_mirror = pip_config[line].split("=")[1].strip()
             break
-    return pip_mirror
+    pip_mirror=pip_mirror.strip("\n\r ")
+    for i in range(len(PIP_MIRRORS)):
+        if PIP_MIRRORS[i]==pip_mirror:
+            pip_mirror=i
+            return pip_mirror
+    return 0
 
 def get_python_version():
     """获取当前Python版本"""
     all_versions=[]
     versions_base=subprocess.run(["where","python"],capture_output=True,shell=True,creationflags=subprocess.CREATE_NO_WINDOW)
     python_version=(versions_base.stdout).decode().split("\n")
-    #print(python_version)
     name=r"Python\d+"
     for i in python_version:
         if i=="" or i==None or i=="\r":
             continue
-        j=i.strip("\r")
+        j=i.strip("\r\n")
         python_ver=j.split("\\")
         if len(python_ver)>2:
             ver=python_ver[-2]
         if re.match(name,ver):
             all_versions.append(f"Pip{ver.strip("Python")}")
     return all_versions
-PIP_MIRRORS = [
-    "https://pypi.tuna.tsinghua.edu.cn/simple",
-    "https://mirrors.aliyun.com/pypi/simple",
-    "https://pypi.mirrors.ustc.edu.cn/simple",
-    "https://pypi.doubanio.com/simple",
-    "https://pypi.hustunique.com/simple",
-    "https://pypi.sdutlinux.org/simple",
-    "https://mirrors.cloud.tencent.com/pypi/simple",
-    "https://mirrors.sustech.edu.cn/pypi/web/simple",
-    "https://mirrors.ustc.edu.cn/pypi/web/simple",
-]
+
 def thread():
     versions_base=subprocess.run(["where","python"],text=True,creationflags=subprocess.CREATE_NO_WINDOW,capture_output=True,shell=True)
     with open(os.path.join(config_path, "pythonpath.txt"), "w") as f:
@@ -1381,6 +1399,8 @@ def settings():
     def set_pip_mirror():
         def thread():
             """设置pip镜像源"""
+            pip_mirror=get_pip_mirror()
+            trust=TRUSTED[pip_mirror]
             try:
                 if pip_mirror_combobox.get()!="" or pip_mirror_combobox.get()!=None:
                     try:
@@ -1401,6 +1421,7 @@ def settings():
                         version="2."+version_p[-1]
                     try:
                         subprocess.run([f"pip{version}.exe", "config", "set","global.index-url",pip_mirror_combobox.get()], creationflags=subprocess.CREATE_NO_WINDOW, text=True, capture_output=True,shell=True)
+                        subprocess.run([f"pip{version}.exe", "config", "set","global.trusted-host",trust], creationflags=subprocess.CREATE_NO_WINDOW, text=True, capture_output=True,shell=True)
                     except:
                         pass
             except:
