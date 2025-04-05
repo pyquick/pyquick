@@ -14,11 +14,19 @@ import ssl
 import requests
 import sv_ttk
 import urllib3
+
 from bs4 import BeautifulSoup
 import urllib3
 import getpass
 import platform
+import ctypes
+from ab.expire import show
+try:
+    ctypes.windll.shcore.SetProcessDpiAwareness(2)
+except:
+    pass
 requests.packages.urllib3.disable_warnings()
+
 #allowthread.txt 记录是否允许多线程下载
 #allowupdatepip.txt 记录是否允许自动更新
 #pythonpath.txt 记录python安装路径
@@ -54,7 +62,7 @@ TRUSTED=[
     "mirrors.ustc.edu.cn",
 ]
 MY_PATH = os.getcwd()
-version_pyquick="2008"
+version_pyquick="2020"
 # 获取用户配置目录
 config_path_base = os.path.join(os.environ["APPDATA"], f"pyquick")
 config_path=os.path.join(config_path_base,version_pyquick)
@@ -218,14 +226,8 @@ if not os.path.exists(os.path.join(config_path, "theme.txt")):
 
 
 def show_about():
-    """显示关于对话框"""
-    if datetime.datetime.now() >= datetime.datetime(2025, 6, 1):
-        time_lim = (datetime.datetime(2025, 7, 13) - datetime.datetime.now()).days
-        messagebox.showwarning("About",
-                               f"Version: Pyquick Magic dev\nBuild: 2008\nExpiration time:2025/4/13\n only {time_lim} days left.")
-    else:
-        time_lim = (datetime.datetime(2025, 7, 13) - datetime.datetime.now()).days
-        messagebox.showinfo("About", f"Version: Pyquick Magic dev\nBuild: 2008\nExpiration time:2025/4/13\n{time_lim} days left.")
+
+    subprocess.Popen([sys.executable, "./ab/about.py"])
 
 
 # 全局变量
@@ -1543,22 +1545,21 @@ def settings():
     if os.path.exists(icon_path):
         w.iconbitmap(icon_path)
     tab_base=ttk.Notebook(w)
+    if build>=22000:
+        theme_frame = ttk.Frame(tab_base, padding="10")
+        tab_base.add(theme_frame, text="Switch Theme")
+        switch = tk.BooleanVar()
+        themes = ttk.Checkbutton(theme_frame, text="Dark Mode", variable=switch, style="Switch.TCheckbutton", command=switch_theme)
+        themes.grid(row=0, column=0, pady=10, padx=10, sticky="w")
 
-    theme_frame = ttk.Frame(tab_base, padding="10")
     python_downlod_frame = ttk.Frame(tab_base, padding="10")
     pip_se_frame = ttk.Frame(tab_base, padding="10")
-    tab_base.add(theme_frame, text="Switch Theme")
+
     tab_base.add(python_downlod_frame, text="Python Download Settings")
     tab_base.add(pip_se_frame, text="Pip Settings")
     tab_base.grid(padx=10, pady=10, row=0, column=0)
 
-    if build>22000:
-        switch = tk.BooleanVar()
-        themes = ttk.Checkbutton(theme_frame, text="Dark Mode", variable=switch, style="Switch.TCheckbutton", command=switch_theme)
-        themes.grid(row=0, column=0, pady=10, padx=10, sticky="w")
-    if build<22000:
-        warnings=ttk.Label(theme_frame,text="Unless you upgrade to Windows 11(21H2 or later), you can not switch your theme.",foreground="red")
-        warnings.grid(row=0, column=0, pady=10, padx=10, sticky="w")
+
     python_download_key_label = ttk.Label(python_downlod_frame, text="Choose Python Download Mirror:")
     python_download_key_label.grid(row=0, column=0, pady=10, padx=10, sticky="e")
 
@@ -1604,25 +1605,37 @@ def settings():
     w.mainloop()
 
 
-
-        
-        
+def war():
+    time.sleep(0.1)
+    subprocess.Popen([sys.executable, show(code="0x0000002A", mode="warn", info="This system will be not supported.")])
+def info():
+    time.sleep(0.1)
+    subprocess.Popen([sys.executable, show(code=None, mode="info", info="You could upgrade to Windows11 for a better experience.")])
 
 
 if __name__ == "__main__":
-    if datetime.datetime.now() >= datetime.datetime(2025, 4, 13):
-        messagebox.showerror("Error", "This program cannot be opened after Apr. 13, 2025.")
+    if datetime.datetime.now() >= datetime.datetime(2025, 8, 13):
+        subprocess.Popen([sys.executable,show(code="0x0000001A", mode="err", info="Pyquick is expired.")])
+        # 使用线程保持主程序运行
         exit(1)
     if build<9600:
-        messagebox.showerror("Error", "Please upgrade to Windows 8.1, or you can not use this program.")
+        subprocess.Popen([sys.executable, show(code="0x0000002A", mode="err", info="Uxexpected Happened.")])
         exit(1)
     elif build>=9600 and build<=18363:
-        messagebox.showwarning("Warning", "These Windows' versions will end their support soon.")
+        multiprocessing.Process(target=war, daemon=True).start()
     elif build<22000 and build>18363:
-        messagebox.showinfo("Advice","Upgrade to Windows 11 for a better experience.(Windows 11 supports sv_ttk FULLY!)")
+        multiprocessing.Process(target=info, daemon=True).start()
     root = tk.Tk()
+    # 自动计算缩放因子
+    dpi = root.winfo_fpixels('1i')
+    scaling_factor = dpi / 96
+    root.tk.call('tk', 'scaling', scaling_factor)
+
+    # 设置PyQt6的高DPI支持
+    from PyQt6 import QtCore
+
     root.title("PyQuick")
-    root.attributes('-topmost', True)
+    #root.attributes('-topmost', True)
     root.resizable(False, False)
     icon_path = os.path.join(MY_PATH, 'pyquick.ico')
     
