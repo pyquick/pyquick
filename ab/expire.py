@@ -75,15 +75,7 @@ class AboutWindow(QWidget):
 
 
 def show(code,mode,info):
-    app = QApplication.instance()
-    if not app:
-        app = QApplication(sys.argv)
-        app.setStyle('Fusion')
-        if not hasattr(app, '_config_initialized'):
-            qconfig.load()
-            setTheme(Theme.AUTO)
-            app._config_initialized = True
-    app.setQuitOnLastWindowClosed(False)
+    app=QApplication(sys.argv)
     window = AboutWindow(code=code,mode=mode,infomation=info)
     window.show()
     app.exec()

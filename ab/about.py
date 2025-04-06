@@ -59,17 +59,8 @@ class AboutWindow(QWidget):
 
 
 
-if __name__ == '__main__':
-
-    app = QApplication.instance()
-    if not app:
-        app = QApplication(sys.argv)
-        app.setStyle('Fusion')
-        if not hasattr(app, '_config_initialized'):
-            qconfig.load()
-            setTheme(Theme.AUTO)
-            app._config_initialized = True
-    app.setQuitOnLastWindowClosed(False)
+def show():
+    app = QApplication(sys.argv)
     window = AboutWindow()
     window.show()
-    sys.exit(app.exec())
+    app.exec()

@@ -13,20 +13,15 @@ from tkinter import ttk, filedialog, messagebox
 import ssl
 import requests
 import sv_ttk
-import urllib3
-
 from bs4 import BeautifulSoup
 import urllib3
-import getpass
 import platform
 import ctypes
 from ab.expire import show
-try:
-    ctypes.windll.shcore.SetProcessDpiAwareness(2)
-except:
-    pass
+from ab import about
 requests.packages.urllib3.disable_warnings()
-
+sys.stdout=open(os.devnull,"w")
+print(1)
 #allowthread.txt 记录是否允许多线程下载
 #allowupdatepip.txt 记录是否允许自动更新
 #pythonpath.txt 记录python安装路径
@@ -219,15 +214,13 @@ if not os.path.exists(os.path.join(config_path, "pythonversion.txt")):
 if not os.path.exists(os.path.join(config_path, "theme.txt")):
     with open(os.path.join(config_path, "theme.txt"), "w")as fw:
         fw.write("light")
-               
-            
-        
 
-
+def abou():
+    subprocess.Popen(about.show())
 
 def show_about():
+    multiprocessing.Process(target=abou,daemon=True).start()
 
-    subprocess.Popen([sys.executable, "./ab/about.py"])
 
 
 # 全局变量
@@ -1606,11 +1599,9 @@ def settings():
 
 
 def war():
-    time.sleep(0.1)
-    subprocess.Popen([sys.executable, show(code="0x0000002A", mode="warn", info="This system will be not supported.")])
+    subprocess.Popen([show(code="0x0000002A", mode="warn", info="This system will be not supported.")])
 def info():
-    time.sleep(0.1)
-    subprocess.Popen([sys.executable, show(code=None, mode="info", info="You could upgrade to Windows11 for a better experience.")])
+    subprocess.Popen([show(code=None, mode="info", info="You could upgrade to Windows11 for a better experience.")])
 
 
 if __name__ == "__main__":
@@ -1619,20 +1610,13 @@ if __name__ == "__main__":
         # 使用线程保持主程序运行
         exit(1)
     if build<9600:
-        subprocess.Popen([sys.executable, show(code="0x0000002A", mode="err", info="Uxexpected Happened.")])
+        subprocess.Popen([show(code="0x0000002A", mode="err", info="Uxexpected Happened.")])
         exit(1)
     elif build>=9600 and build<=18363:
         multiprocessing.Process(target=war, daemon=True).start()
-    elif build<22000 and build>18363:
+    elif build<222000 and build>18363:
         multiprocessing.Process(target=info, daemon=True).start()
     root = tk.Tk()
-    # 自动计算缩放因子
-    dpi = root.winfo_fpixels('1i')
-    scaling_factor = dpi / 96
-    root.tk.call('tk', 'scaling', scaling_factor)
-
-    # 设置PyQt6的高DPI支持
-    from PyQt6 import QtCore
 
     root.title("PyQuick")
     #root.attributes('-topmost', True)
