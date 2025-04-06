@@ -571,14 +571,15 @@ def download_file(selected_version, destination_path, num_threads):
     # 启用取消下载按钮
     
 
-ib=0
+
 def update_progress():
+    ib = 0
     """更新进度条和状态标签
 
     通过计算已下载字节数与总文件大小的比例来更新进度条和状态标签的文本。
     此函数在一个单独的线程中运行，以保持UI响应性。
     """
-    global file_size, is_downloading, url, ib
+    global file_size, is_downloading, url
     
     progress_bar.config(mode="indeterminate")
     progress_bar.start(10)
