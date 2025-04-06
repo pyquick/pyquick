@@ -14,13 +14,13 @@ class AboutWindow(QWidget):
         self.initUI()
 
     def initUI(self):
-        with open("ab/gpl3.txt", "r") as f:
+        with open("gpl3.txt", "r") as f:
             self.gpl=f.read()
         self.textEdit = TextEdit()
         self.textEdit.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout = QVBoxLayout()
         self.remin = (datetime.datetime(2025, 8, 13) - datetime.datetime.now()).days
-        self.image = ImageLabel("ab/magic.png")
+        self.image = ImageLabel("magic.png")
         self.image.setBorderRadius(8, 8, 8, 8)
         self.link=HyperlinkLabel(QUrl('https://github.com/pyquick/pyquick/'), 'This Project')
         self.pyquick=SubtitleLabel("PyQuick")
@@ -63,4 +63,4 @@ def show():
     app = QApplication(sys.argv)
     window = AboutWindow()
     window.show()
-    app.exec()
+    sys.exit(app.exec())

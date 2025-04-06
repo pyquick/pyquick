@@ -101,7 +101,6 @@ def thread():
     with open(os.path.join(config_path, "pythonpath.txt"), "w") as f:
         f.write(versions_base.stdout.strip("\r"))
 def save_path():
-    
     while True:
        p=multiprocessing.Process(target=thread)
        p.start()
@@ -216,10 +215,10 @@ if not os.path.exists(os.path.join(config_path, "theme.txt")):
         fw.write("light")
 
 def abou():
-    subprocess.Popen(about.show())
+    subprocess.Popen(about.show(),shell=True,creationflags=subprocess.CREATE_NO_WINDOW)
 
 def show_about():
-    multiprocessing.Process(target=abou,daemon=True).start()
+    multiprocessing.Process(target=abou).start()
 
 
 
@@ -1599,23 +1598,23 @@ def settings():
 
 
 def war():
-    subprocess.Popen([show(code="0x0000002A", mode="warn", info="This system will be not supported.")])
+    subprocess.Popen([show(code="0x0000002A", mode="warn", info="This system will be not supported.")],creationflags=subprocess.CREATE_NO_WINDOW,shell=True)
 def info():
-    subprocess.Popen([show(code=None, mode="info", info="You could upgrade to Windows11 for a better experience.")])
+    subprocess.Popen([show(code=None, mode="info", info="You could upgrade to Windows11 for a better experience.")],creationflags=subprocess.CREATE_NO_WINDOW,shell=True)
 
 
 if __name__ == "__main__":
     if datetime.datetime.now() >= datetime.datetime(2025, 8, 13):
-        subprocess.Popen([sys.executable,show(code="0x0000001A", mode="err", info="Pyquick is expired.")])
+        subprocess.Popen([sys.executable,show(code="0x0000001A", mode="err", info="Pyquick is expired.")],creationflags=subprocess.CREATE_NO_WINDOW,shell=True)
         # 使用线程保持主程序运行
         exit(1)
     if build<9600:
-        subprocess.Popen([show(code="0x0000002A", mode="err", info="Uxexpected Happened.")])
+        subprocess.Popen([show(code="0x0000002A", mode="err", info="Uxexpected Happened.")],creationflags=subprocess.CREATE_NO_WINDOW,shell=True)
         exit(1)
     elif build>=9600 and build<=18363:
-        multiprocessing.Process(target=war, daemon=True).start()
-    elif build<222000 and build>18363:
-        multiprocessing.Process(target=info, daemon=True).start()
+        multiprocessing.Process(target=war).start()
+    elif build<22000 and build>18363:
+        multiprocessing.Process(target=info).start()
     root = tk.Tk()
 
     root.title("PyQuick")
@@ -1749,7 +1748,7 @@ if __name__ == "__main__":
 
     
     if build>22000:
-        load_theme()
+        threading.Thread(target=load_theme,daemon=True).start()
     threading.Thread(target=show_name, daemon=True).start()
     threading.Thread(target=read_python_version, daemon=True).start()
     threading.Thread(target=check_python_installation, daemon=True).start()
@@ -1757,5 +1756,5 @@ if __name__ == "__main__":
     threading.Thread(target=allow_thread, daemon=True).start()
     threading.Thread(target=show_pip_version, daemon=True).start()
     multiprocessing.Process(target=save_path).start()
-    get_pip_mirror()
+    multiprocessing.Process(target=get_pip_mirror).start()
     root.mainloop()

@@ -10,6 +10,8 @@ import datetime
 #0x0000002A/0x0007000B 表示系统不符合要求
 #0x0F00600B--0x00000600 pyquick运行时错误（dev有任何问题都会报错）
 #那个info.png是pyquick重大通知用的，如更新
+# 在PyQt窗口关闭时强制释放资源
+
 class AboutWindow(QWidget):
     def __init__(self,code,mode,infomation):
         super().__init__()
@@ -25,15 +27,15 @@ class AboutWindow(QWidget):
 
         self.remin = (datetime.datetime(2025, 8, 13) - datetime.datetime.now()).days
         if ico=="error" or ico=="err":
-            self.image = ImageLabel("ab/error.png")
+            self.image = ImageLabel("error.png")
             self.la=TitleLabel("Pyquick Error")
             self.error=StrongBodyLabel(f"STOP_CODE: {error_code}")
         elif ico=="warning" or ico=="warn":
-            self.image = ImageLabel("ab/warning.png")
+            self.image = ImageLabel("warning.png")
             self.la=TitleLabel("Warning")
             self.error=StrongBodyLabel(f"WARN_CODE: {error_code}")
         elif ico=="info":
-            self.image = ImageLabel("ab/info.png")
+            self.image = ImageLabel("info.png")
             self.la=TitleLabel("Information")
             #self.error=StrongBodyLabel(f"INFO_CODE: {error_code}")
         self.image.scaledToHeight(100)
@@ -61,7 +63,7 @@ class AboutWindow(QWidget):
 
         self.ok=PushButton("OK")
         self.ok.setFixedWidth(120)
-        self.ok.clicked.connect(lambda : sys.exit(0))
+        self.ok.clicked.connect(lambda : sys.exit(error_code))
 
         self.layout.addLayout(self.hlayout)
         self.layout.addWidget(self.inla)
@@ -78,4 +80,4 @@ def show(code,mode,info):
     app=QApplication(sys.argv)
     window = AboutWindow(code=code,mode=mode,infomation=info)
     window.show()
-    app.exec()
+    sys.exit(app.exec())
