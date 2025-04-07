@@ -10,10 +10,12 @@ class AboutWindow(QWidget):
         super().__init__()
         self.setWindowTitle("About")
         self.setWindowIcon(QIcon("pyquick.ico"))
-        self.resize(500,400)
         self.initUI()
 
     def initUI(self):
+        view=QWidget()
+        scrollArea = SingleDirectionScrollArea(orient=Qt.Orientation.Vertical)
+        scrollArea.resize(200, 400)
         with open("gpl3.txt", "r") as f:
             self.gpl=f.read()
         self.textEdit = TextEdit()
@@ -55,6 +57,7 @@ class AboutWindow(QWidget):
         layout.addWidget(self.pq)
         layout.addWidget(self.ok,0,Qt.AlignmentFlag.AlignRight)
         self.setLayout(layout)
+        scrollArea.setWidget(view)
 
 
 
