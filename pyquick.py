@@ -65,18 +65,21 @@ processes=[]
 pip_souc=os.path.join(os.environ["APPDATA"], f"pip","pip.ini")
 def get_pip_mirror():
     pip_souc = os.path.join(os.environ["APPDATA"], f"pip", "pip.ini")
-    with open(pip_souc, "r") as f:
-        pip_config = f.readlines()
-    for line in range(len(pip_config)):
-        pip_config[line] = pip_config[line].strip("\n\r")
-        if "index-url" in pip_config[line]:
-            pip_mirror = pip_config[line].split("=")[1].strip()
-            break
-    pip_mirror=pip_mirror.strip("\n\r ")
-    for i in range(len(PIP_MIRRORS)):
-        if PIP_MIRRORS[i]==pip_mirror:
-            pip_mirror=i
-            return pip_mirror
+    if os.path.exists(pip_souc):
+        with open(pip_souc, "r") as f:
+            pip_config = f.readlines()
+        for line in range(len(pip_config)):
+            pip_config[line] = pip_config[line].strip("\n\r")
+            if "index-url" in pip_config[line]:
+                pip_mirror = pip_config[line].split("=")[1].strip()
+                break
+        pip_mirror=pip_mirror.strip("\n\r ")
+        for i in range(len(PIP_MIRRORS)):
+            if PIP_MIRRORS[i]==pip_mirror:
+                pip_mirror=i
+                return pip_mirror
+    else:
+        return -1
     return 0
 
 def get_python_version():
@@ -1525,6 +1528,7 @@ def settings():
             return 0
     py_ver=read_py_ver()
     pip_mirror =get_pip_mirror()
+    
     for i in range(len(PIP_MIRRORS)):
         if pip_mirror==PIP_MIRRORS[i]:
             pip_mirror=i
@@ -1587,7 +1591,11 @@ def settings():
 
     pip_mirror_combobox=ttk.Combobox(pip_se_frame,values=PIP_MIRRORS,state="readonly",width=50)
     pip_mirror_combobox.grid(row=1, column=1, pady=10, padx=10, sticky="w")
-    pip_mirror_combobox.current(pip_mirror)
+    if pip_mirror>=0:
+        pip_mirror_combobox.current(pip_mirror)
+        
+    else:
+        pip_mirror_combobox.state("disabled")
 
     if build>22000:
         load_theme()
