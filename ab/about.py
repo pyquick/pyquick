@@ -66,4 +66,11 @@ def show():
     app = QApplication(sys.argv)
     window = AboutWindow()
     window.show()
+    app.exec()  # 修改为不退出主进程
+    return window
+
+if __name__ == "__main__":
+    app = QApplication(sys.argv)
+    window = AboutWindow()
+    window.show()
     sys.exit(app.exec())
