@@ -219,6 +219,15 @@ texts = {
         "pip_up_to_date": "Pip已是最新版本({}, 版本:{})",
         "pip_new_version_available": "有新版本可用({}:{}-->{})",
         "failed_to_get_pip_version": "获取Pip版本失败",
+        "select_pip_version": "选择Pip版本:",
+        "pip_not_found": "未找到选择的Pip版本",
+        "package_install_success": "{} 安装成功",
+        "package_install_failed": "安装失败: {}",
+        "package_install_error": "安装出错: {}",
+        "package_uninstall_confirm": "确定要卸载 {} 吗?",
+        "package_uninstall_success": "{} 卸载成功",
+        "package_uninstall_failed": "卸载失败: {}",
+        "package_uninstall_error": "卸载出错: {}",
     },
     "en_US": {
         "app_title": "PyQuick - Python Installation and Management Tool",
@@ -439,6 +448,15 @@ texts = {
         "pip_up_to_date": "Pip is up to date({}, Ver:{})",
         "pip_new_version_available": "New version available({}:{}-->{})",
         "failed_to_get_pip_version": "Failed to get pip version",
+        "select_pip_version": "Select Pip Version:",
+        "pip_not_found": "Selected Pip version not found",
+        "package_install_success": "{} installed successfully",
+        "package_install_failed": "Installation failed: {}",
+        "package_install_error": "Installation error: {}",
+        "package_uninstall_confirm": "Are you sure you want to uninstall {}?",
+        "package_uninstall_success": "{} uninstalled successfully",
+        "package_uninstall_failed": "Uninstallation failed: {}",
+        "package_uninstall_error": "Uninstallation error: {}",
     }
 }
 

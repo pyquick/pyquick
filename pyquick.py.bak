@@ -337,7 +337,7 @@ def on_closing():
 
 def cancel_download():
     """取消下载"""
-    global is_downloading, is_paused, futures, executor, destination
+    global is_downloading, is_paused, futures, executor
     
     if is_downloading:
         try:
@@ -353,36 +353,16 @@ def cancel_download():
                 executor.shutdown(wait=False)
             
             # 删除未完成的文件
-            if 'destination' in globals() and destination and os.path.exists(destination):
-                try:
-                    os.remove(destination)
-                except Exception as e:
-                    logger.error(f"删除未完成的文件失败: {e}")
+            if os.path.exists(destination):
+                os.remove(destination)
             
-            # 在主线程中安全地更新UI
-            def update_ui():
-                status_label.config(text=get_text("download_canceled"))
-                progress_bar.grid_forget()  # 隐藏进度条
-                download_button.config(state="normal")  # 恢复下载按钮
-                cancel_button.grid_forget()  # 隐藏取消按钮
-                pause_button.grid_forget()  # 隐藏暂停按钮
-            
-            # 确保在主线程中执行UI更新
-            if threading.current_thread() is threading.main_thread():
-                update_ui()
-            else:
-                root.after(0, update_ui)
-                
+            status_label.config(text=get_text("download_canceled"))
+            progress_bar.grid_forget()  # 隐藏进度条
+            download_button.config(state="normal")  # 恢复下载按钮
+            cancel_button.grid_forget()  # 隐藏取消按钮
+            pause_button.grid_forget()  # 隐藏暂停按钮
         except Exception as e:
-            logger.error(f"取消下载时出错: {e}")
-            # 确保在主线程中显示错误消息
-            def show_error():
-                messagebox.showerror(get_text("error"), get_text("cancel_error").format(e))
-            
-            if threading.current_thread() is threading.main_thread():
-                show_error()
-            else:
-                root.after(0, show_error)
+            messagebox.showerror(get_text("error"), get_text("cancel_error").format(e))
     
     return_normal()
 
@@ -1209,26 +1189,10 @@ def download_selected_version():
 
 def show_pip_version():
     """显示pip版本，安全地避免线程问题"""
-    # 不要在这里直接更新UI
+    global pip_upgrade_button, pip_retry_button
     
-    # 在主线程中安全地更新UI的函数
-    def update_pip_ui_safely(action, button_text, button_state):
-        try:
-            pip_upgrade_button.config(text=button_text, state=button_state)
-            pip_retry_button.grid_forget()  # 隐藏重试按钮
-        except Exception as e:
-            logger.error(f"更新pip UI失败: {e}")
-    
-    # 在主线程中安全地显示错误消息
-    def update_pip_ui_error():
-        try:
-            pip_upgrade_button.config(text=get_text("failed_to_get_pip_version"), state="disabled")
-            pip_retry_button.grid(row=1, column=0, columnspan=3, pady=10, padx=10)
-        except Exception as e:
-            logger.error(f"更新pip错误UI失败: {e}")
-    
-    # 首先在主线程中设置检查中状态
-    root.after(0, lambda: update_pip_ui_safely("checking", get_text("pip_checking"), "disabled"))
+    # 在UI开始检查前先更新按钮文本
+    pip_upgrade_button.config(text=get_text("pip_checking"), state="disabled")
     
     # 定义线程函数
     def check_pip_version_thread():
@@ -1271,32 +1235,29 @@ def show_pip_version():
             # 安全地在主线程中更新错误UI
             root.after(0, lambda: update_pip_ui_error())
     
-    # 如果从主线程调用，直接启动检查线程
-    if threading.current_thread() is threading.main_thread():
-        threading.Thread(target=check_pip_version_thread, daemon=True).start()
-    else:
-        # 如果已经在线程中，则让主线程启动检查线程
-        root.after(0, lambda: threading.Thread(target=check_pip_version_thread, daemon=True).start())
+    # 在主线程中安全地更新UI的函数
+    def update_pip_ui_safely(action, button_text, button_state):
+        try:
+            pip_upgrade_button.config(text=button_text, state=button_state)
+            pip_retry_button.grid_forget()  # 隐藏重试按钮
+        except Exception as e:
+            logger.error(f"更新pip UI失败: {e}")
+    
+    # 在主线程中安全地显示错误消息
+    def update_pip_ui_error():
+        try:
+            pip_upgrade_button.config(text=get_text("failed_to_get_pip_version"), state="disabled")
+            pip_retry_button.grid(row=1, column=0, columnspan=3, pady=10, padx=10)
+        except Exception as e:
+            logger.error(f"更新pip错误UI失败: {e}")
+    
+    # 启动后台线程检查pip版本
+    threading.Thread(target=check_pip_version_thread, daemon=True).start()
 
 def retry_pip_ui():
     """重试检查pip版本"""
-    try:
-        # 直接调用show_pip_version()函数
-        if threading.current_thread() is threading.main_thread():
-            show_pip_version()
-        else:
-            # 如果从非主线程调用，则使用root.after确保在主线程中执行
-            root.after(0, show_pip_version)
-    except Exception as e:
-        logger.error(f"重试检查pip版本失败: {e}")
-        # 确保错误信息在UI上显示
-        try:
-            root.after(0, lambda: pip_upgrade_button.config(
-                text=get_text("failed_to_get_pip_version"), 
-                state="disabled"
-            ))
-        except Exception:
-            pass
+    # 直接调用show_pip_version()函数
+    show_pip_version()
 
 def monitor_package_ui():
     """监控包版本更新"""
@@ -3094,8 +3055,7 @@ if __name__ == "__main__":
     threading.Thread(target=check_python_installation, daemon=True).start()
     threading.Thread(target=lambda: check_package_upgradeable("", config_path), daemon=True).start()
     threading.Thread(target=allow_thread, daemon=True).start()
-    # 直接在主线程中调用show_pip_version，而不是在单独的线程中
-    root.after(100, show_pip_version)  # 使用延迟确保GUI已完全初始化
+    threading.Thread(target=show_pip_version, daemon=True).start()
     threading.Thread(target=save_path, daemon=True).start()
     threading.Thread(target=get_pip_mirror, daemon=True).start()
 

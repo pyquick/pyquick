@@ -66,17 +66,13 @@ def get_latest_pip_version():
 
 def show_pip_version(config_path, pip_upgrade_button, install_button, uninstall_button, pip_retry_button):
     """Check and display current pip version"""
+    # 初始化允许更新标志
     with open(os.path.join(config_path, "allowupdatepip.txt"), "w") as fw:
         fw.write("True")
         fw.write("\n")
 
-    def thread():
-        # 使用root对象的after方法在主线程中更新GUI
-        import tkinter as tk
-        root = tk._default_root  # 获取默认根窗口
-
-        # 在主线程中更新GUI
-        root.after(0, lambda: pip_upgrade_button.config(text="Checking...", state="disabled"))
+    # 工作线程函数
+    def check_pip_version_thread():
         try:
             # 获取当前pip版本
             version_pip = get_pip_version(config_path)
@@ -92,64 +88,70 @@ def show_pip_version(config_path, pip_upgrade_button, install_button, uninstall_
             if not latest_version:
                 raise Exception("无法获取最新pip版本")
             
+            # 安全地在主线程中更新UI
+            import tkinter as tk
+            root = tk._default_root  # 获取默认根窗口
+            
             # 成功获取版本后隐藏重试按钮
             root.after(0, lambda: pip_retry_button.grid_forget())
             
             if version_pip == latest_version:
                 # 使用root.after在主线程中更新GUI
-                root.after(0, lambda: pip_upgrade_button.config(text=f"Pip is up to date({python_name}, Ver:{version_pip})", state="disabled"))
+                root.after(0, lambda: pip_upgrade_button.config(
+                    text=f"Pip is up to date({python_name}, Ver:{version_pip})", 
+                    state="disabled"
+                ))
                 with open(os.path.join(config_path, "allowupdatepip.txt"), "w") as fw:
-                    fw.write("False")
-                    fw.write("\n")
+                    fw.write("False\n")
+                    fw.write(version_pip)
             else:
                 # 将状态更新放在主线程中执行
                 def update_pip_button():
-                    pip_upgrade_button.config(text=f"New version available({python_name}:{version_pip}-->{latest_version})")
+                    pip_upgrade_button.config(
+                        text=f"New version available({python_name}:{version_pip}-->{latest_version})"
+                    )
                     if "disabled" in install_button.state() and "disabled" in uninstall_button.state(): 
                         pip_upgrade_button.config(state="disabled")
-                    elif install_button.state() == () or uninstall_button.state() == ():
+                    else:
                         pip_upgrade_button.config(state="normal")
                 
                 root.after(0, update_pip_button)
                 with open(os.path.join(config_path, "allowupdatepip.txt"), "w") as fw:
-                    fw.write("False")
-                    fw.write("\n")
-                    
-            # 确保成功后不可见重试按钮
-            root.after(0, lambda: pip_retry_button.grid_forget())
+                    fw.write("True\n")
+                    fw.write(version_pip)
             
         except Exception as e:
             logger.error(f"Failed to get pip version: {e}")
             
             # 使用root.after在主线程中更新GUI
-            def handle_error():
-                pip_upgrade_button.config(text=f"Failed to get pip version", state="disabled")
-                pip_retry_button.grid(row=1, column=0, columnspan=3, pady=10, padx=10)
+            import tkinter as tk
+            root = tk._default_root  # 获取默认根窗口
             
-            root.after(0, handle_error)
-            return "error"
+            root.after(0, lambda: pip_upgrade_button.config(
+                text=f"Failed to get pip version", 
+                state="disabled"
+            ))
+            root.after(0, lambda: pip_retry_button.grid(
+                row=1, column=0, columnspan=3, pady=10, padx=10
+            ))
+            
+    # 先在主线程中设置检查状态
+    try:
+        import tkinter as tk
+        root = tk._default_root
+        root.after(0, lambda: pip_upgrade_button.config(text="Checking...", state="disabled"))
+    except Exception as e:
+        logger.error(f"Failed to update initial UI state: {e}")
     
-    while True:
-        # 使用写入标志文件的方式来控制更新逻辑
-        with open(os.path.join(config_path, "allowupdatepip.txt"), "r") as rw:
-            a = rw.readline()
-            allow = str(a).strip("\n")
-        
-        if allow == "True":
-            a = threading.Thread(target=thread, daemon=True)
-            a.start()
-            a.join()
-            time.sleep(1)
-        
-        with open(os.path.join(config_path, "allowupdatepip.txt"), "r") as rw:
-            a = rw.readline()
-            allow = str(a).strip("\n")
-        
-        if allow == "False":
-            # 只需等待标志变化，不再检测版本变化
-            time.sleep(0.1)
+    # 启动后台线程进行检查
+    threading.Thread(target=check_pip_version_thread, daemon=True).start()
 
 def retry_pip(pip_retry_button, show_pip_version_func):
     """Retry checking pip version"""
-    pip_retry_button.grid_forget()
-    threading.Thread(target=show_pip_version_func, daemon=True).start()
+    try:
+        # 先隐藏重试按钮
+        pip_retry_button.grid_forget()
+        # 调用检查函数
+        show_pip_version_func()
+    except Exception as e:
+        logger.error(f"Failed to retry pip version check: {e}")
