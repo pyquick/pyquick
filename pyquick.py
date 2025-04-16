@@ -955,121 +955,91 @@ def estimate_remaining_time(downloaded, total, speed):
         return f"{remaining_seconds/3600:.1f} hours"
 
 def update_progress():
-    ib = 0
-    """Update progress bar and status label
-
-    Updates the progress bar and status label text by calculating the ratio
-    of downloaded bytes to total file size. This function runs in a separate
-    thread to maintain UI responsiveness.
-    """
-    global file_size, is_downloading, url, is_paused, last_downloaded, last_time, download_speeds
+    """Update progress bar and status label in a thread-safe manner"""
+    global file_size, is_downloading, is_paused, last_downloaded, last_time, download_speeds
     
-    progress_bar.config(mode="indeterminate")
-    progress_bar.start(10)
+    def update_ui(progress, status_text, speed_text):
+        """Update UI elements in main thread"""
+        progress_bar['value'] = progress
+        status_label.config(text=status_text)
+        logger.debug(status_text.replace("Progress: ", ""))
+    
+    # Initialize progress bar
+    root.after(0, lambda: [
+        progress_bar.config(mode="indeterminate"),
+        progress_bar.start(10)
+    ])
     
     last_downloaded = 0
     last_time = time.time()
     
     # Continue updating progress while any download task is not completed
     while any(not future.done() for future in futures):
-        # If download status is False, stop updating progress
         if not is_downloading:
             break
         
         current_time = time.time()
         elapsed = current_time - last_time
         
-        if elapsed >= 1.0:  # Update speed once per second
+        # Update speed once per second
+        if elapsed >= 1.0:
             current_downloaded = downloaded_bytes[0]
             bytes_diff = current_downloaded - last_downloaded
             
             if bytes_diff > 0 and elapsed > 0:
-                speed = bytes_diff / elapsed  # bytes/second
+                speed = bytes_diff / elapsed
                 download_speeds.append(speed)
-                
-                # Calculate average download speed
                 avg_speed = sum(download_speeds) / len(download_speeds)
                 speed_str = calculate_download_speed(bytes_diff, elapsed)
                 remaining_time = estimate_remaining_time(current_downloaded, file_size, avg_speed)
-                
-                logger.debug(f"Current download speed: {speed_str}, estimated time remaining: {remaining_time}")
+                logger.debug(f"Current speed: {speed_str}, remaining: {remaining_time}")
             
             last_downloaded = current_downloaded
             last_time = current_time
         
-        if ib==0:
-            progress_bar.stop()
-            progress_bar.config(mode="determinate")
-            progress_bar["maximum"]=100
-        
-        # Calculate and update download progress percentage
-        ib+=1
+        # Calculate progress
         progress = int(downloaded_bytes[0] / file_size * 100)
         
-        # Convert downloaded bytes to MB
+        # Prepare status text
         downloaded_mb = downloaded_bytes[0] / (1024 * 1024)
-        downloaded_kb = downloaded_bytes[0] / (1024)
-        download_b = downloaded_bytes[0]
-        
-        # Convert total file size to MB
         total_mb = file_size / (1024 * 1024)
-        total_kb = file_size / (1024)
-        total_b = file_size
-        
-        # If there's enough data to calculate download speed
         speed_text = ""
+        
         if len(download_speeds) > 0:
             avg_speed = sum(download_speeds) / len(download_speeds)
             speed_str = calculate_download_speed(avg_speed, 1)
             remaining_time = estimate_remaining_time(downloaded_bytes[0], file_size, avg_speed)
-            speed_text = f" - {speed_str} - Remaining: {remaining_time}"
+            speed_text = f" - {speed_str} - {get_text('remaining')}: {remaining_time}"
         
-        status_text = ""
+        status_text = f"{get_text('progress')}: {progress}%"
         if is_paused:
-            status_text = " (PAUSED)"
+            status_text += f" ({get_text('paused')})"
         
         if total_mb >= 1:
-            progress_bar['value'] = progress
-            status_label.config(text=f"Progress: {progress}%{status_text} ({downloaded_mb:.2f} MB / {total_mb:.2f} MB){speed_text}")
-            logger.debug(f"Download progress: {progress}% ({downloaded_mb:.2f} MB / {total_mb:.2f} MB){speed_text}")
-        elif total_kb >= 1 and total_mb < 1:
-            progress_bar['value'] = progress
-            status_label.config(text=f"Progress: {progress}%{status_text} ({downloaded_kb:.2f} KB / {total_kb:.2f} KB){speed_text}")
-            logger.debug(f"Download progress: {progress}% ({downloaded_kb:.2f} KB / {total_kb:.2f} KB){speed_text}")
+            status_text += f" ({downloaded_mb:.2f} MB / {total_mb:.2f} MB){speed_text}"
         else:
-            progress_bar['value'] = progress
-            status_label.config(text=f"Progress: {progress}%{status_text} ({download_b} Bytes / {total_b} Bytes){speed_text}")
-            logger.debug(f"Download progress: {progress}% ({download_b} Bytes / {total_b} Bytes){speed_text}")
+            downloaded_kb = downloaded_bytes[0] / 1024
+            total_kb = file_size / 1024
+            status_text += f" ({downloaded_kb:.2f} KB / {total_kb:.2f} KB){speed_text}"
         
-        # Update progress bar value
-        progress_bar['value'] = progress
-        # Pause for 0.1 seconds to reduce UI update frequency
+        # Update UI in main thread
+        root.after(0, lambda p=progress, s=status_text: update_ui(p, s, speed_text))
         time.sleep(0.1)
+    
+    # Final update when download completes or is cancelled
+    def final_update():
+        if is_downloading:
+            progress_bar['value'] = 100
+            status_label.config(text=get_text("download_complete"))
+            logger.info(f"Download completed: {destination}")
+        else:
+            status_label.config(text=get_text("download_cancelled"))
+            logger.warning(f"Download cancelled: {destination}")
         
-    # If download status is True, it means download is complete
-    if is_downloading:
-        progress_bar['value'] = 100
-        status_label.config(text="Download Complete!")
-        logger.info(f"Download completed: {destination}")
         return_normal()
-    # If download status is False, it means download has been canceled
-    else:
-        status_label.config(text="Download Cancelled!")
-        logger.warning(f"Download cancelled: {destination}")
-        return_normal()
+        root.after(5000, clear)
     
-    # Set download status to False, indicating download is complete or canceled
-    is_downloading = False
-    is_paused = False
-    
-    # Hide related buttons
-    cancel_button.grid_forget()
-    pause_button.grid_forget()
-    
-    # Restore progress bar position
-    progress_bar.grid(row=7, column=0, columnspan=3, pady=10, padx=10)
-    
-    root.after(5000, clear)
+    root.after(0, final_update)
 
 def return_normal():
     """重置下载状态和UI元素"""
