@@ -198,47 +198,49 @@ def update_pip_ui():
     if not hasattr(globals(), 'pip_version_check_status') or pip_version_check_status is None:
         return
     
-    try:
-        status = pip_version_check_status
-        
-        if status.get("action") == "checking":
-            pip_upgrade_button.config(text=get_text("pip_checking"), state="disabled")
-        
-        elif status.get("action") == "up_to_date":
-            pip_upgrade_button.config(
-                text=get_text("pip_up_to_date").format(
-                    status.get("python_name", ""), 
-                    status.get("version_pip", "")
-                ), 
-                state="disabled"
-            )
-            pip_retry_button.grid_forget()
-        
-        elif status.get("action") == "update_available":
-            pip_upgrade_button.config(
-                text=get_text("pip_new_version_available").format(
-                    status.get("python_name", ""), 
-                    status.get("version_pip", ""), 
-                    status.get("latest_version", "")
+    def update_ui(status):
+        try:
+            if status.get("action") == "checking":
+                pip_upgrade_button.config(text=get_text("pip_checking"), state="disabled")
+            
+            elif status.get("action") == "up_to_date":
+                pip_upgrade_button.config(
+                    text=get_text("pip_up_to_date").format(
+                        status.get("python_name", ""), 
+                        status.get("version_pip", "")
+                    ), 
+                    state="disabled"
                 )
-            )
+                pip_retry_button.grid_forget()
             
-            if "disabled" in install_button.state() and "disabled" in uninstall_button.state(): 
-                pip_upgrade_button.config(state="disabled")
-            elif install_button.state() == () or uninstall_button.state() == ():
-                pip_upgrade_button.config(state="normal")
+            elif status.get("action") == "update_available":
+                pip_upgrade_button.config(
+                    text=get_text("pip_new_version_available").format(
+                        status.get("python_name", ""), 
+                        status.get("version_pip", ""), 
+                        status.get("latest_version", "")
+                    )
+                )
+                
+                if "disabled" in install_button.state() and "disabled" in uninstall_button.state(): 
+                    pip_upgrade_button.config(state="disabled")
+                elif install_button.state() == () or uninstall_button.state() == ():
+                    pip_upgrade_button.config(state="normal")
+                
+                pip_retry_button.grid_forget()
             
-            pip_retry_button.grid_forget()
+            elif status.get("action") == "error":
+                pip_upgrade_button.config(text=get_text("failed_to_get_pip_version"), state="disabled")
+                pip_retry_button.grid(row=1, column=0, columnspan=3, pady=10, padx=10)
+            
+            # 清除状态，避免重复处理
+            pip_version_check_status = None
         
-        elif status.get("action") == "error":
-            pip_upgrade_button.config(text=get_text("failed_to_get_pip_version"), state="disabled")
-            pip_retry_button.grid(row=1, column=0, columnspan=3, pady=10, padx=10)
-        
-        # 清除状态，避免重复处理
-        pip_version_check_status = None
+        except Exception as e:
+            logger.error(f"更新pip UI出错: {e}")
     
-    except Exception as e:
-        logger.error(f"更新pip UI出错: {e}")
+    # 确保在主线程中更新UI
+    root.after(0, lambda: update_ui(pip_version_check_status))
 
 def save_path():
     """后台定期检查pip版本的函数"""
@@ -358,6 +360,8 @@ def cancel_download():
                     os.remove(destination)
                 except Exception as e:
                     logger.error(f"删除未完成的文件失败: {e}")
+                    error_msg = get_text("delete_file_error").format(e)
+                    root.after(0, lambda msg=error_msg: messagebox.showerror(get_text("error"), msg))
             
             # 在主线程中安全地更新UI
             def update_ui():
@@ -367,22 +371,14 @@ def cancel_download():
                 cancel_button.grid_forget()  # 隐藏取消按钮
                 pause_button.grid_forget()  # 隐藏暂停按钮
             
-            # 确保在主线程中执行UI更新
-            if threading.current_thread() is threading.main_thread():
-                update_ui()
-            else:
-                root.after(0, update_ui)
+            # 总是使用after调度到主线程
+            root.after(0, update_ui)
                 
         except Exception as e:
             logger.error(f"取消下载时出错: {e}")
             # 确保在主线程中显示错误消息
-            def show_error():
-                messagebox.showerror(get_text("error"), get_text("cancel_error").format(e))
-            
-            if threading.current_thread() is threading.main_thread():
-                show_error()
-            else:
-                root.after(0, show_error)
+            error_msg = get_text("cancel_error").format(e)
+            root.after(0, lambda msg=error_msg: messagebox.showerror(get_text("error"), msg))
     
     return_normal()
 
@@ -633,9 +629,10 @@ def python_version_reload():
     def python_version_reload_thread():
         try:
             with LogPerformance(logger, "重新加载Python版本列表"):
-                # 更新UI状态
-                version_reload_button.configure(state="disabled", text=get_text("reload"))
-                root.update()
+                # 在主线程中更新UI状态
+                def update_ui_state(state, text):
+                    version_reload_button.configure(state=state, text=text)
+                root.after(0, lambda: update_ui_state("disabled", get_text("reload")))
                 
                 # 获取镜像源
                 mirror = None
@@ -662,7 +659,7 @@ def python_version_reload():
                 response = requests.get(url, verify=False, timeout=30)
                 if response.status_code != 200:
                     logger.error(f"HTTP请求失败，状态码: {response.status_code}")
-                    version_reload_button.configure(state="normal", text=get_text("reload"))
+                    root.after(0, lambda: update_ui_state("normal", get_text("reload")))
                     return
                 
                 bs = BeautifulSoup(response.content, "lxml")
@@ -677,8 +674,7 @@ def python_version_reload():
                 
                 if results:
                     logger.info(f"找到 {len(results)} 个Python版本")
-                    version_reload_button.configure(text=get_text("sorting"))
-                    root.update()
+                    root.after(0, lambda: update_ui_state("disabled", get_text("sorting")))
                     
                     # 排序版本
                     sort_results(results)
@@ -688,16 +684,25 @@ def python_version_reload():
                         f.write(str(results))
                 else:
                     logger.warning("未找到任何Python版本")
-                    messagebox.showwarning(get_text("warning_msg"), get_text("no_python_versions"))
+                    warning_msg = get_text("no_python_versions")
+                    root.after(0, lambda msg=warning_msg: messagebox.showwarning(
+                        get_text("warning_msg"), msg
+                    ))
         except Exception as e:
             logger.error(f"Python版本重新加载失败: {e}", exc_info=True)
-            messagebox.showerror(get_text("error"), get_text("python_version_load_failed").format(str(e)))
+            # 使用after方法将GUI操作调度到主线程
+            error_msg = get_text("python_version_load_failed").format(str(e))
+            root.after(0, lambda msg=error_msg: messagebox.showerror(
+                get_text("error"), msg
+            ))
         finally:
-            # 恢复按钮状态
-            if is_downloading:
+            # 恢复按钮状态，使用after方法调度到主线程
+            def update_button_state():
+                if is_downloading:
                     version_reload_button.configure(state="disabled", text=get_text("reload"))
-            else:
+                else:
                     version_reload_button.configure(state="normal", text=get_text("reload"))
+            root.after(0, update_button_state)
     
     # 启动加载线程
     threading.Thread(target=python_version_reload_thread, daemon=True).start()
@@ -882,18 +887,22 @@ def pause_resume_download():
     """Pause or resume download"""
     global is_paused
     
-    if is_paused:
-        # Resume download
-        is_paused = False
-        pause_button.config(text="Pause Download")
-        status_label.config(text="Download resumed")
-        logger.info("Download resumed")
-    else:
-        # Pause download
-        is_paused = True
-        pause_button.config(text="Resume Download")
-        status_label.config(text="Download paused")
-        logger.info("Download paused")
+    def update_ui():
+        if is_paused:
+            # Pause download UI
+            pause_button.config(text=get_text("resume_download"))
+            status_label.config(text=get_text("download_paused"))
+        else:
+            # Resume download UI
+            pause_button.config(text=get_text("pause_download"))
+            status_label.config(text=get_text("download_resumed"))
+    
+    # Toggle pause state
+    is_paused = not is_paused
+    logger.info("Download paused" if is_paused else "Download resumed")
+    
+    # Update UI in main thread
+    root.after(0, update_ui)
 
 def calculate_download_speed(bytes_received, elapsed_time):
     """

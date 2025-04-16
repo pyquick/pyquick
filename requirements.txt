@@ -1,5 +1,4 @@
 requests
-wget
 sv_ttk
 nuitka
 lxml
@@ -7,4 +6,3 @@ beautifulsoup4
 PyQt6
 PyQt6-tools
 PyQt6-Fluent-Widgets[full]
-urllib3
