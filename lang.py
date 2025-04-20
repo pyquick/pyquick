@@ -1,3 +1,18 @@
+"""
+PyQuick 语言模块
+提供多语言支持和动态语言切换功能
+
+此模块包含:
+1. 所有UI文本的多语言翻译字典
+2. 语言设置和获取函数
+3. 语言切换回调机制
+"""
+import os
+import logging
+
+# 获取日志记录器
+logger = logging.getLogger("PyQuick")
+
 # 语言文本字典
 texts = {
     "zh_CN": {
@@ -31,6 +46,7 @@ texts = {
         "restart_recommended": "建议重启应用程序",
         "settings_read_fail": "读取设置失败",
         "settings_save_fail": "保存设置失败",
+        "delete_file_error": "删除文件失败: {}",
         
         # 主界面文本
         "python_download": "Python下载",
@@ -47,6 +63,15 @@ texts = {
         "pause_download": "暂停下载",
         "resume_download": "继续下载",
         
+        # 下载状态
+        "progress": "进度",
+        "paused": "已暂停",
+        "remaining": "剩余时间",
+        "download_complete": "下载完成！",
+        "download_resumed": "下载已恢复",
+        "download_cancelled": "下载已取消",
+        "download_paused": "下载已暂停",
+        
         # Pip管理
         "pip_version": "Pip版本:",
         "retry": "重试",
@@ -54,6 +79,22 @@ texts = {
         "install_package": "安装包",
         "uninstall_package": "卸载包",
         "upgrade_package": "升级包",
+        "package_management": "包管理",
+        "package_list": "包列表",
+        "requirements": "导入/导出需求",
+        "refresh_packages": "刷新包列表",
+        "import_requirements": "导入requirements.txt",
+        "export_requirements": "导出requirements.txt",
+        "uninstall_all": "卸载所有包",
+        "search_packages": "搜索包:",
+        "package_name": "包名",
+        "current_version": "当前版本",
+        "latest_version": "最新版本",
+        "status": "状态",
+        "actions": "操作",
+        "up_to_date": "已是最新",
+        "upgradeable": "可升级",
+        "not_installed": "未安装",
         
         # 菜单
         "settings_menu": "设置",
@@ -78,6 +119,7 @@ texts = {
         "close": "关闭",
         "run_diagnostics": "运行网络诊断",
         "refresh_info": "刷新信息",
+        "memory_usage": "内存使用",
         "log_filter": "日志过滤:",
         "show_errors_only": "只显示错误",
         "show_errors_warnings": "显示错误和警告",
@@ -228,6 +270,32 @@ texts = {
         "package_uninstall_success": "{} 卸载成功",
         "package_uninstall_failed": "卸载失败: {}",
         "package_uninstall_error": "卸载出错: {}",
+        
+        # 新增设置文本
+        "python_management": "Python 管理",
+        "available_python_versions": "可用的 Python 版本:",
+        "python_path": "安装路径",
+        "pip_installed": "Pip 已安装",
+        "pip_not_installed": "Pip 未安装",
+        "install_pip": "安装 Pip",
+        "scan_python_versions": "扫描 Python 版本",
+        "log_size_unit": "单位:",
+        "mb": "MB",
+        "kb": "KB",
+        "gb": "GB",
+        "test_url": "测试 URL",
+        "url_test_success": "URL 测试成功",
+        "url_test_failed": "URL 测试失败: {}",
+        "unit_selection": "选择单位",
+        "mirror_test_window_error": "打开镜像测试窗口失败: {}",
+        "select_pip_version_first": "请先选择要切换的pip版本",
+        "pip_version_switched": "pip版本已切换为 {version}",
+        "pip_version_switch_failed": "切换pip版本失败",
+        "load_pip_versions_failed": "加载pip版本列表失败",
+        "no_pip_versions_found": "未找到可用的pip版本",
+        "pip_version_management": "pip版本管理",
+        "select_pip_version": "选择pip版本:",
+        "switch_version": "切换版本",
     },
     "en_US": {
         "app_title": "PyQuick - Python Installation and Management Tool",
@@ -243,7 +311,7 @@ texts = {
         "default_source": "Default Source",
         "pip_mirror": "Pip Mirror:",
         "log_settings": "Log Settings",
-        "max_log_size": "Max Log Size(MB):",
+        "max_log_size": "Max Log Size:",
         "download_settings": "Download Settings",
         "enable_multithreading": "Enable Multithreading",
         "enable_pip_version_check": "Auto Check Pip Update",
@@ -260,8 +328,9 @@ texts = {
         "restart_recommended": "It is recommended to restart the application",
         "settings_read_fail": "Failed to read settings",
         "settings_save_fail": "Failed to save settings",
+        "delete_file_error": "Failed to delete file: {}",
         
-        # 主界面
+        # Main Interface
         "python_download": "Python Download",
         "pip_management": "Pip Management",
         "select_python_version": "Select Python Version:",
@@ -276,15 +345,40 @@ texts = {
         "pause_download": "Pause Download",
         "resume_download": "Resume Download",
         
-        # Pip管理
+        # Download status
+        "progress": "Progress",
+        "paused": "Paused",
+        "remaining": "Remaining",
+        "download_complete": "Download complete!",
+        "download_resumed": "Download resumed",
+        "download_cancelled": "Download cancelled",
+        "download_paused": "Download paused",
+        
+        # Pip Management
         "pip_version": "Pip Version:",
         "retry": "Retry",
         "enter_package_name": "Enter Package Name:",
         "install_package": "Install Package",
         "uninstall_package": "Uninstall Package",
         "upgrade_package": "Upgrade Package",
+        "package_management": "Package Management",
+        "package_list": "Package List",
+        "requirements": "Requirements Import/Export",
+        "refresh_packages": "Refresh Packages",
+        "import_requirements": "Import requirements.txt",
+        "export_requirements": "Export requirements.txt",
+        "uninstall_all": "Uninstall All Packages",
+        "search_packages": "Search Packages:",
+        "package_name": "Package Name",
+        "current_version": "Current Version",
+        "latest_version": "Latest Version",
+        "status": "Status",
+        "actions": "Actions",
+        "up_to_date": "Up to date",
+        "upgradeable": "Upgradeable",
+        "not_installed": "Not installed",
         
-        # 菜单
+        # Menus
         "settings_menu": "Settings",
         "help_menu": "Help",
         "about": "About",
@@ -297,7 +391,7 @@ texts = {
         "exit": "Exit",
         "do_you_want_to_quit": "Are you sure you want to quit?",
         
-        # 调试信息
+        # Debug Info
         "system_info": "System Info",
         "app_info": "Application Info",
         "app_warning": "Application Warning",
@@ -307,6 +401,7 @@ texts = {
         "close": "Close",
         "run_diagnostics": "Run Network Diagnostics",
         "refresh_info": "Refresh Info",
+        "memory_usage": "Memory Usage",
         "log_filter": "Log Filter:",
         "show_errors_only": "Show Errors Only",
         "show_errors_warnings": "Show Errors and Warnings",
@@ -407,7 +502,7 @@ texts = {
         "no_files_found": "No files found",
         "loading_file_failed": "Failed to load file list: {}",
         
-        # 网络诊断
+        # Network Diagnostics
         "network_test_ready": "Ready",
         "network_test_initializing": "Initializing...",
         "network_test_preparing": "Preparing network diagnostics...",
@@ -431,7 +526,7 @@ texts = {
         "resume_test": "Resume Test",
         "cancel_test": "Cancel Test",
         
-        # 主题相关
+        # Theme related
         "theme_setting": "Theme: ",
         "theme_read_fail": "Theme configuration read failed: ",
         "select_python_version_first": "Please select a Python version first",
@@ -457,24 +552,163 @@ texts = {
         "package_uninstall_success": "{} uninstalled successfully",
         "package_uninstall_failed": "Uninstallation failed: {}",
         "package_uninstall_error": "Uninstallation error: {}",
+        
+        # New settings texts
+        "python_management": "Python Management",
+        "available_python_versions": "Available Python Versions:",
+        "python_path": "Installation Path",
+        "pip_installed": "Pip Installed",
+        "pip_not_installed": "Pip Not Installed",
+        "install_pip": "Install Pip",
+        "scan_python_versions": "Scan Python Versions",
+        "log_size_unit": "Unit:",
+        "mb": "MB",
+        "kb": "KB",
+        "gb": "GB",
+        "test_url": "Test URL",
+        "url_test_success": "URL Test Successful",
+        "url_test_failed": "URL Test Failed: {}",
+        "unit_selection": "Select Unit",
+        "mirror_test_window_error": "Failed to open mirror test window: {}",
+        "select_pip_version_first": "Please select the pip version to switch",
+        "pip_version_switched": "Pip version switched to {version}",
+        "pip_version_switch_failed": "Failed to switch pip version",
+        "load_pip_versions_failed": "Failed to load pip version list",
+        "no_pip_versions_found": "No available pip versions found",
+        "pip_version_management": "Pip Version Management",
+        "select_pip_version": "Select Pip Version:",
+        "switch_version": "Switch Version",
     }
 }
 
-current_language = "zh_CN"  # 默认语言
+# 默认语言
+current_language = "zh_CN"  
+
+# 回调函数列表 - 当语言变更时会调用这些函数
+language_change_callbacks = []
+
+def register_language_callback(callback_function):
+    """
+    注册语言变更回调函数
+    
+    参数:
+        callback_function: 当语言变更时要调用的函数
+    """
+    if callback_function not in language_change_callbacks:
+        language_change_callbacks.append(callback_function)
+        return True
+    return False
+
+def unregister_language_callback(callback_function):
+    """
+    取消注册语言变更回调函数
+    
+    参数:
+        callback_function: 要移除的回调函数
+    """
+    if callback_function in language_change_callbacks:
+        language_change_callbacks.remove(callback_function)
+        return True
+    return False
 
 def set_language(lang):
-    """设置当前语言"""
+    """
+    设置当前语言并触发回调
+    
+    参数:
+        lang: 语言代码，如 'zh_CN' 或 'en_US'
+        
+    返回:
+        bool: 语言设置是否成功
+    """
     global current_language
     if lang in texts:
+        old_language = current_language
         current_language = lang
+        
+        # 如果语言真的变化了，触发回调
+        if old_language != current_language:
+            for callback in language_change_callbacks:
+                try:
+                    callback()
+                except Exception as e:
+                    logger.error(f"Language change callback error: {e}")
         return True
     return False
 
 def get_text(key):
-    """获取当前语言的文本"""
+    """
+    获取当前语言的文本
+    
+    参数:
+        key: 文本键值
+        
+    返回:
+        str: 对应语言的文本，如果找不到则返回键值本身
+    """
     global current_language
     if current_language not in texts:
         current_language = "zh_CN"  # 如果设置的语言不存在，使用默认语言
     
     lang_texts = texts[current_language]
     return lang_texts.get(key, key)  # 如果找不到对应文本，返回键值本身 
+
+def get_available_languages():
+    """
+    获取所有可用的语言
+    
+    返回:
+        dict: 语言代码和对应的显示名称
+    """
+    languages = {}
+    for lang_code in texts.keys():
+        if lang_code == "zh_CN":
+            languages[lang_code] = "简体中文"
+        elif lang_code == "en_US":
+            languages[lang_code] = "English"
+        else:
+            languages[lang_code] = lang_code
+    
+    return languages
+
+def save_language_setting(config_path, lang):
+    """
+    保存语言设置到配置文件
+    
+    参数:
+        config_path: 配置文件路径
+        lang: 语言代码
+        
+    返回:
+        bool: 保存是否成功
+    """
+    try:
+        language_file = os.path.join(config_path, "language.txt")
+        with open(language_file, "w", encoding="utf-8") as f:
+            f.write(lang)
+        return True
+    except Exception as e:
+        logger.error(f"Failed to save language setting: {e}")
+        return False
+
+def load_language_setting(config_path):
+    """
+    从配置文件加载语言设置
+    
+    参数:
+        config_path: 配置文件路径
+        
+    返回:
+        str: 语言代码，如果加载失败则返回默认值 "zh_CN"
+    """
+    try:
+        language_file = os.path.join(config_path, "language.txt")
+        if os.path.exists(language_file):
+            with open(language_file, "r", encoding="utf-8") as f:
+                lang = f.read().strip()
+                if lang in texts:
+                    return lang
+    except Exception as e:
+        logger.error(f"Failed to load language setting: {e}")
+    
+    return "zh_CN"  # 默认语言

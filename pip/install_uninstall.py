@@ -12,26 +12,59 @@ logger = get_logger()
 def get_pip_command_version(config_path):
     """Get pip command version based on Python version"""
     try:
+        # 从配置文件读取版本信息
         with open(os.path.join(config_path, "pythonversion.txt"), "r") as f:
-            version_pip = f.readlines()[-1].strip("\n")
-    except:
-        version_pip = ""
-    
-    if version_pip == "":
-        return None
+            version_str = f.readlines()[-1].strip("\n")
+            
+        if not version_str or not version_str.startswith("Pip"):
+            logger.warning("无效的版本字符串格式")
+            return None
+            
+        version_num = version_str[3:]  # 提取数字部分
+        if len(version_num) < 2:  # 确保至少有两位数字
+            logger.warning("版本号格式不正确")
+            return None
+            
+        # 格式化版本号（例如：将"310"转换为"3.10"）
+        major = version_num[0]
+        minor = version_num[1:]
+        version = f"{major}.{minor}"
         
-    version_p = list(version_pip)
-    if "Pip3" in version_pip:
-        if len(version_p) == 5:
-            version = "3." + version_p[-1]
-        else:
-            version = "3." + version_p[-2] + version_p[-1]
-    elif "Pip2" in version_pip:
-        version = "2." + version_p[-1]
-    else:
-        return None
+        # 构造pip命令名称
+        pip_cmd = f"pip{version}"
         
-    return f"pip{version}.exe"
+        # 检验命令是否可用
+        try:
+            result = subprocess.run(
+                [pip_cmd, "--version"],
+                capture_output=True,
+                text=True,
+                creationflags=subprocess.CREATE_NO_WINDOW
+            )
+            if result.returncode == 0:
+                logger.info(f"找到可用的pip命令: {pip_cmd}")
+                return f"{pip_cmd}.exe"
+        except Exception as e:
+            logger.debug(f"pip命令 {pip_cmd} 不可用: {e}")
+            
+        # 如果特定版本不可用，尝试使用通用pip命令
+        try:
+            result = subprocess.run(
+                ["pip", "--version"],
+                capture_output=True,
+                text=True,
+                creationflags=subprocess.CREATE_NO_WINDOW
+            )
+            if result.returncode == 0:
+                logger.info("使用通用pip命令")
+                return "pip.exe"
+        except Exception as e:
+            logger.warning(f"通用pip命令也不可用: {e}")
+            
+    except Exception as e:
+        logger.error(f"获取pip命令版本失败: {e}")
+        
+    return None
 
 def install_package(package_name, config_path, package_status_label, pip_progress_bar, 
                    install_button, pip_upgrade_button, package_entry, uninstall_button, 
@@ -249,4 +282,4 @@ def uninstall_package(package_name, config_path, package_status_label, pip_progr
             install_button.config(state="normal")           
             root.after(5000, clear_status)
     
-    threading.Thread(target=uninstall_package_thread, daemon=True).start() 
+    threading.Thread(target=uninstall_package_thread, daemon=True).start()

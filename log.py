@@ -97,7 +97,7 @@ def setup_logger(
     # 为 Logger 类添加 verbose 方法
     logging.Logger.verbose = verbose
     
-    version_pyquick = "2020"
+    version_pyquick = "2050"
     config_path_base = os.path.join(os.environ["APPDATA"], "pyquick")
     config_path = os.path.join(config_path_base, version_pyquick)
     log_dir = os.path.join(config_path, "log")

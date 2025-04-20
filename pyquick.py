@@ -30,10 +30,37 @@ from pip import (
     uninstall_package, upgrade_package, monitor_package_version, check_package_upgradeable,
     get_pip_version, get_latest_pip_version
 )
+from pip.check_ver import get_python_versions
 import concurrent.futures
 import json
 from lang import set_language, get_text, texts, current_language
 import gc  # 添加gc模块导入
+import traceback  # 添加traceback模块导入
+from utils import run_with_progress, safe_ui_update, safe_config, safe_grid, safe_grid_forget
+# 导入mirror_test模块
+import os
+import sys
+import time
+import tkinter as tk
+from tkinter import ttk, filedialog, messagebox, PhotoImage, font
+import threading
+import logging
+import platform
+import subprocess
+import tempfile
+import re
+import webbrowser
+import requests
+import gc
+import concurrent.futures
+import socket
+import psutil
+import datetime
+# 导入mirror_test模块
+try:
+    from mirror_test import show_mirror_test_window
+except ImportError:
+    print("无法导入mirror_test模块，请确保mirror_test.py在正确的路径下")
 
 # 获取日志记录器，GUI应用禁用控制台输出
 logger = get_logger(use_console=False)
@@ -57,7 +84,6 @@ PIP_MIRRORS = [
     "https://pypi.tuna.tsinghua.edu.cn/simple/",
     "https://mirrors.aliyun.com/pypi/simple/",
     "https://pypi.mirrors.ustc.edu.cn/simple",
-    "https://pypi.doubanio.com/simple/",
     "https://pypi.hustunique.com/simple/",
     "https://pypi.sdutlinux.org/simple/",
     "https://mirrors.cloud.tencent.com/pypi/simple/",
@@ -69,7 +95,6 @@ TRUSTED=[
     "pypi.tuna.tsinghua.edu.cn",
     "mirrors.aliyun.com",
     "pypi.mirrors.ustc.edu.cn",
-    "pypi.doubanio.com",
     "pypi.hustunique.com",
     "pypi.sdutlinux.org",
     "mirrors.cloud.tencent.com",
@@ -77,7 +102,7 @@ TRUSTED=[
     "mirrors.ustc.edu.cn",
 ]
 MY_PATH = os.getcwd()
-version_pyquick="2020"
+version_pyquick="2050"
 # 获取用户配置目录
 config_path_base = os.path.join(os.environ["APPDATA"], f"pyquick")
 config_path=os.path.join(config_path_base,version_pyquick)
@@ -113,7 +138,7 @@ def get_python_version():
     name = r"Python\d+"
     
     for location in python_locations:
-        if not location or location == "\r":
+        if not location or location == "\r" or "WindowsApps" in location:
             continue
             
         location = location.strip("\r\n")
@@ -124,8 +149,9 @@ def get_python_version():
             # 通常 Python 安装文件夹名为 "Python310" 或 "Python39"
             folder_name = path_parts[-2]
             
-            # 检查是否匹配 Python 文件夹命名模式
-            if re.match(name, folder_name):
+            # 使用正则表达式精确匹配版本号
+            version_match = re.search(r'Python(\d+)', folder_name)
+            if version_match:
                 # 提取版本号（如 310 从 Python310）
                 version = folder_name.strip("Python")
                 
@@ -268,15 +294,20 @@ def save_path():
                 if current_version != last_check_version or auto_check_enabled:
                     check_needed = True
             except Exception as e:
-                logger.error(f"读取pip版本检查设置失败: {e}")
-                # 出错时默认需要检查
-                check_needed = True
+                    logger.error(f"读取pip版本检查设置失败: {e}")
+                    # 出错时默认需要检查
+                    check_needed = True
             
             # 如果需要检查，调用show_pip_version函数
             if check_needed:
                 last_check_version = current_version
-                # 使用主线程中的单次调用更新UI，而不是启动新线程
-                root.after(0, show_pip_version)
+                # 确保使用root.after在主线程中调用show_pip_version
+                try:
+                    # 在主线程中安排执行
+                    if root and root.winfo_exists():
+                        root.after(0, show_pip_version)
+                except Exception as e:
+                    logger.error(f"安排pip版本检查任务失败: {e}")
             
             # 较长时间睡眠，减少资源消耗
             time.sleep(5.0)
@@ -298,44 +329,48 @@ def allow_thread():
                 if not lines:
                     return
                 aa = lines[-1].strip("\n")
-                if aa == "True":
-                    # 使用root.after确保在主线程中更新GUI
-                    root.after(0, lambda: thread_label.grid(row=2, column=0, pady=10, padx=10, sticky="e"))
-                    root.after(0, lambda: thread_combobox.grid(row=2, column=1, pady=10, padx=10, sticky="w"))
-                else:
-                    # 使用root.after确保在主线程中更新GUI
-                    root.after(0, lambda: thread_label.grid_forget())
-                    root.after(0, lambda: thread_combobox.grid_forget())
+                # 不要直接更新GUI，仅读取设置并准备更新信息
+                return {"allowed": aa == "True"}
         except Exception as e:
             logger.error(f"allow_thread 函数出错: {e}")
+            return None
     
     while True:
         try:
-            t = threading.Thread(target=thread_func, daemon=True)
-            t.start()
+            # 执行线程函数
+            thread_result = thread_func()
+            # 在主线程中安全地更新UI
+            if root and root.winfo_exists():
+                safe_grid(thread_label, row=2, column=0, pady=10, padx=10, sticky="e")
             time.sleep(0.5)  # 增加间隔时间，减少线程创建频率
         except Exception as e:
             logger.error(f"创建线程出错: {e}")
             time.sleep(1.0)  # 出错后等待更长时间再重试
 
-def on_closing():
+# 添加一个辅助函数来更新thread UI组件
+def update_thread_ui(result):
+    """在主线程中更新线程相关的UI组件"""
     try:
-        if is_downloading:
-            messagebox.askokcancel("Exit", "Do you want to quit?")
-            cancel_download()
-        root.destroy()
-        sys.exit(0)
-        subprocess.run(["taskkill","/IM","python.exe","/F"],creationflags=subprocess.CREATE_NO_WINDOW,text=True,capture_output=True)
-        subprocess.run(["taskkill","/IM","python_tool.exe","/F"],creationflags=subprocess.CREATE_NO_WINDOW,text=True,capture_output=True)
-        subprocess.run(["taskkill","/IM","pyquick.exe","/F"],creationflags=subprocess.CREATE_NO_WINDOW,text=True,capture_output=True)
-        subprocess.run(["taskkill","/IM","pythonw.exe","/F"],creationflags=subprocess.CREATE_NO_WINDOW,text=True,capture_output=True) 
-        subprocess.run(["taskkill","/IM","pythonw.exe","/F"],creationflags=subprocess.CREATE_NO_WINDOW,text=True,capture_output=True) 
-    except:
-        subprocess.run(["taskkill","/IM","python.exe","/F"],creationflags=subprocess.CREATE_NO_WINDOW,text=True,capture_output=True)
-        subprocess.run(["taskkill","/IM","python_tool.exe","/F"],creationflags=subprocess.CREATE_NO_WINDOW,text=True,capture_output=True)
-        subprocess.run(["taskkill","/IM","pyquick.exe","/F"],creationflags=subprocess.CREATE_NO_WINDOW,text=True,capture_output=True)
-        subprocess.run(["taskkill","/IM","pythonw.exe","/F"],creationflags=subprocess.CREATE_NO_WINDOW,text=True,capture_output=True) 
-        subprocess.run(["taskkill","/IM","pythonw.exe","/F"],creationflags=subprocess.CREATE_NO_WINDOW,text=True,capture_output=True) 
+        if result and "allowed" in result:
+            if result["allowed"]:
+                safe_grid(thread_label, row=2, column=0, pady=10, padx=10, sticky="e")
+                thread_combobox.grid(row=2, column=1, pady=10, padx=10, sticky="w")
+            else:
+                safe_grid_forget(thread_label)
+                thread_combobox.grid_forget()
+    except Exception as e:
+        logger.error(f"更新线程UI出错: {e}")
+
+def on_closing():
+    # 设置全局标志，所有线程在循环中检查此标志
+    global app_running
+    app_running = False
+    
+    # 等待一段时间让后台线程完成工作
+    time.sleep(0.5)
+    
+    # 销毁窗口
+    root.destroy()
 
 def cancel_download():
     """取消下载"""
@@ -345,7 +380,7 @@ def cancel_download():
         try:
             is_downloading = False
             is_paused = False
-            
+        
             # 取消所有任务
             for future in futures:
                 future.cancel()
@@ -353,7 +388,7 @@ def cancel_download():
             # 关闭线程池
             if executor:
                 executor.shutdown(wait=False)
-            
+        
             # 删除未完成的文件
             if 'destination' in globals() and destination and os.path.exists(destination):
                 try:
@@ -361,15 +396,15 @@ def cancel_download():
                 except Exception as e:
                     logger.error(f"删除未完成的文件失败: {e}")
                     error_msg = get_text("delete_file_error").format(e)
-                    root.after(0, lambda msg=error_msg: messagebox.showerror(get_text("error"), msg))
+                    safe_ui_update(root, messagebox.showerror, get_text("error"), msg=error_msg)
             
             # 在主线程中安全地更新UI
             def update_ui():
-                status_label.config(text=get_text("download_canceled"))
-                progress_bar.grid_forget()  # 隐藏进度条
-                download_button.config(state="normal")  # 恢复下载按钮
-                cancel_button.grid_forget()  # 隐藏取消按钮
-                pause_button.grid_forget()  # 隐藏暂停按钮
+                safe_config(status_label, text=get_text("download_canceled"))
+                safe_grid_forget(progress_bar)  # 隐藏进度条
+                safe_config(download_button, state="normal")  # 恢复下载按钮
+                safe_grid_forget(cancel_button)  # 隐藏取消按钮
+                safe_grid_forget(pause_button)  # 隐藏暂停按钮
             
             # 总是使用after调度到主线程
             root.after(0, update_ui)
@@ -378,7 +413,7 @@ def cancel_download():
             logger.error(f"取消下载时出错: {e}")
             # 确保在主线程中显示错误消息
             error_msg = get_text("cancel_error").format(e)
-            root.after(0, lambda msg=error_msg: messagebox.showerror(get_text("error"), msg))
+            safe_ui_update(root, messagebox.showerror, get_text("error"), msg=error_msg)
     
     return_normal()
 
@@ -445,10 +480,11 @@ if not os.path.exists(os.path.join(config_path, "log_size.txt")):
         fw.write("10")  # 默认10MB
 
 def abou():
-    subprocess.Popen(about.show(),shell=True,creationflags=subprocess.CREATE_NO_WINDOW)
+    from ab import about
+    about.show(root)
 
 def show_about():
-    multiprocessing.Process(target=abou, daemon=True).start()
+    abou()
 
 # 全局变量
 file_size = 0
@@ -466,18 +502,18 @@ last_time = 0
 
 def clear():
     """清除状态标签和包标签的文本"""
-    status_label.config(text="")
-    package_status_label.config(text="")
-    package_label.config(text="Enter Package Name:")
-    progress_bar['value']=0
+    safe_config(status_label, text="")
+    safe_config(package_status_label, text="")
+    safe_config(package_label, text="Enter Package Name:")
+    safe_ui_update(progress_bar, value=0)
 
 
 def select_destination():
     """选择目标路径"""
     destination_path = filedialog.askdirectory()
     if destination_path:
-        destination_entry.delete(0, tk.END)
-        destination_entry.insert(0, destination_path)
+        safe_config(destination_entry, text="")
+        safe_config(destination_entry, text=destination_path)
 
 
 class Version:
@@ -699,10 +735,10 @@ def python_version_reload():
             # 恢复按钮状态，使用after方法调度到主线程
             def update_button_state():
                 if is_downloading:
-                    version_reload_button.configure(state="disabled", text=get_text("reload"))
+                        version_reload_button.configure(state="disabled", text=get_text("reload"))
                 else:
-                    version_reload_button.configure(state="normal", text=get_text("reload"))
-            root.after(0, update_button_state)
+                        version_reload_button.configure(state="normal", text=get_text("reload"))
+                root.after(0, update_button_state)
     
     # 启动加载线程
     threading.Thread(target=python_version_reload_thread, daemon=True).start()
@@ -867,7 +903,7 @@ def download_chunk(url, start_byte, end_byte, destination, chunk_id=0, retries=5
                     logger.warning(f"分块 {chunk_id} 下载失败，将在 {wait_time:.2f} 秒后重试 ({attempt + 1}/{retries}): {e}")
                     
                     if is_downloading:
-                        status_label.config(text=f"Chunk {chunk_id}: Retry in {wait_time:.1f}s ({attempt + 1}/{retries})")
+                        safe_ui_update(status_label, text=f"Chunk {chunk_id}: Retry in {wait_time:.1f}s ({attempt + 1}/{retries})")
                 
                 # 准备下一次重试
                 attempt += 1
@@ -889,13 +925,13 @@ def pause_resume_download():
     
     def update_ui():
         if is_paused:
-            # Pause download UI
-            pause_button.config(text=get_text("resume_download"))
-            status_label.config(text=get_text("download_paused"))
+                # Pause download UI
+                safe_config(pause_button, text=get_text("resume_download"))
+                safe_config(status_label, text=get_text("download_paused"))
         else:
-            # Resume download UI
-            pause_button.config(text=get_text("pause_download"))
-            status_label.config(text=get_text("download_resumed"))
+                # Resume download UI
+                safe_config(pause_button, text=get_text("pause_download"))
+                safe_config(status_label, text=get_text("download_resumed"))
     
     # Toggle pause state
     is_paused = not is_paused
@@ -960,14 +996,14 @@ def update_progress():
     
     def update_ui(progress, status_text, speed_text):
         """Update UI elements in main thread"""
-        progress_bar['value'] = progress
-        status_label.config(text=status_text)
+        safe_ui_update(progress_bar, value=progress)
+        safe_config(status_label, text=status_text)
         logger.debug(status_text.replace("Progress: ", ""))
     
     # Initialize progress bar
     root.after(0, lambda: [
-        progress_bar.config(mode="indeterminate"),
-        progress_bar.start(10)
+        safe_ui_update(progress_bar, mode="indeterminate"),
+        safe_ui_update(progress_bar, start=10)
     ])
     
     last_downloaded = 0
@@ -1025,19 +1061,19 @@ def update_progress():
         # Update UI in main thread
         root.after(0, lambda p=progress, s=status_text: update_ui(p, s, speed_text))
         time.sleep(0.1)
-    
+        
     # Final update when download completes or is cancelled
     def final_update():
         if is_downloading:
-            progress_bar['value'] = 100
-            status_label.config(text=get_text("download_complete"))
-            logger.info(f"Download completed: {destination}")
+                safe_ui_update(progress_bar, value=100)
+                safe_config(status_label, text=get_text("download_complete"))
+                logger.info(f"Download completed: {destination}")
         else:
-            status_label.config(text=get_text("download_cancelled"))
-            logger.warning(f"Download cancelled: {destination}")
-        
+                safe_config(status_label, text=get_text("download_cancelled"))
+                logger.warning(f"Download cancelled: {destination}")
+            
         return_normal()
-        root.after(5000, clear)
+    root.after(5000, clear)
     
     root.after(0, final_update)
 
@@ -1048,18 +1084,18 @@ def return_normal():
     is_paused = False
     
     # 重置UI元素
-    progress_bar['value'] = 0
-    status_label.config(text="")
+    safe_ui_update(progress_bar, value=0)
+    safe_config(status_label, text="")
     
     
     # 恢复按钮状态
-    download_button.config(state="normal")
-    cancel_button.grid_forget()
-    pause_button.grid_forget()
+    safe_config(download_button, state="normal")
+    safe_grid_forget(cancel_button)  # 隐藏取消按钮
+    safe_grid_forget(pause_button)  # 隐藏暂停按钮
     
     # 确保状态标签和进度条正确显示
-    progress_bar.grid(row=7, column=0, columnspan=3, pady=10, padx=10)
-    status_label.grid(row=8, column=0, columnspan=3, pady=10, padx=10)
+    safe_grid(progress_bar, row=7, column=0, columnspan=3, pady=10, padx=10)
+    safe_grid(status_label, row=8, column=0, columnspan=3, pady=10, padx=10)
 
 def download_selected_version():
     """下载选定的Python版本"""
@@ -1100,17 +1136,17 @@ def download_selected_version():
             return
 
     # 更新UI状态
-    download_button.config(state="disabled")  # 禁用下载按钮
-    cancel_button.grid(row=4, column=0, columnspan=1, pady=10, padx=10, sticky="e")  # 显示取消按钮
-    cancel_button.config(state="normal")
+    safe_config(download_button, state="disabled")  # 禁用下载按钮
+    safe_grid(cancel_button, row=4, column=0, columnspan=1, pady=10, padx=10, sticky="e")  # 显示取消按钮
+    safe_config(cancel_button, state="normal")
 
     # 调整暂停按钮位置，置于取消按钮下方
-    pause_button.grid(row=5, column=0, columnspan=1, pady=10, padx=10, sticky="e")  # 显示暂停按钮
-    pause_button.config(text="Pause Download", state="normal")
+    safe_grid(pause_button, row=5, column=0, columnspan=1, pady=10, padx=10, sticky="e")  # 显示暂停按钮
+    safe_config(pause_button, text="Pause Download", state="normal")
     
     # 确保进度条和状态标签正确显示
-    progress_bar.grid(row=7, column=0, columnspan=3, pady=10, padx=10)
-    status_label.grid(row=8, column=0, columnspan=3, pady=10, padx=10)
+    safe_grid(progress_bar, row=7, column=0, columnspan=3, pady=10, padx=10)
+    safe_grid(status_label, row=8, column=0, columnspan=3, pady=10, padx=10)
     
     selected_url = None
     python_mirror = read_python_mirror()
@@ -1120,7 +1156,7 @@ def download_selected_version():
         selected_url = download_url
     else:
         # 尝试所有镜像
-        status_label.config(text=get_text("finding_mirror"))
+        safe_config(status_label, text=get_text("finding_mirror"))
         for mirror in PYTHON_MIRRORS:
             download_url = f"{mirror}/{version}/{file_name}"
             try:
@@ -1133,9 +1169,9 @@ def download_selected_version():
 
     if not selected_url:
         messagebox.showerror(get_text("error"), get_text("failed_to_find_mirror"))
-        download_button.config(state="normal")  # 恢复下载按钮
-        cancel_button.grid_forget()  # 隐藏取消按钮
-        pause_button.grid_forget()  # 隐藏暂停按钮
+        safe_config(download_button, state="normal")  # 恢复下载按钮
+        safe_grid_forget(cancel_button)  # 隐藏取消按钮
+        safe_grid_forget(pause_button)  # 隐藏暂停按钮
         return
 
     # 重置下载状态
@@ -1156,12 +1192,12 @@ def download_selected_version():
         
         if file_size == 0:
             messagebox.showerror(get_text("error"), get_text("failed_to_get_file_size"))
-            download_button.config(state="normal")  # 恢复下载按钮
-            cancel_button.grid_forget()  # 隐藏取消按钮
-            pause_button.grid_forget()  # 隐藏暂停按钮
+            safe_config(download_button, state="normal")  # 恢复下载按钮
+            safe_grid_forget(cancel_button)  # 隐藏取消按钮
+            safe_grid_forget(pause_button)  # 隐藏暂停按钮
             return
         
-        status_label.config(text=get_text("starting_download").format(file_name))
+        safe_config(status_label, text=get_text("starting_download").format(file_name))
         
         # 计算每个线程应下载的文件块大小
         chunk_size = file_size // threads
@@ -1181,9 +1217,9 @@ def download_selected_version():
         
     except Exception as e:
         messagebox.showerror(get_text("error"), get_text("download_start_failed").format(e))
-        download_button.config(state="normal")  # 恢复下载按钮
-        cancel_button.grid_forget()  # 隐藏取消按钮
-        pause_button.grid_forget()  # 隐藏暂停按钮
+        safe_config(download_button, state="normal")  # 恢复下载按钮
+        safe_grid_forget(cancel_button)  # 隐藏取消按钮
+        safe_grid_forget(pause_button)  # 隐藏暂停按钮
         is_downloading = False
 
 def show_pip_version():
@@ -1233,7 +1269,7 @@ def show_pip_version():
                 )
                 button_state = "normal"
                 # 检查其他按钮状态
-                if "disabled" in install_button.state() and "disabled" in uninstall_button.state():
+                if "disabled" in install_button.state() and "disabled" in uninstall_button.state(): 
                     button_state = "disabled"
                 update_flag = "True"
             
@@ -1241,7 +1277,7 @@ def show_pip_version():
             with open(os.path.join(config_path, "allowupdatepip.txt"), "w") as fw:
                 fw.write(update_flag + "\n")
                 fw.write(version_pip if version_pip else "")
-            
+                    
             # 安全地在主线程中更新UI
             root.after(0, lambda: update_pip_ui_safely(action, button_text, button_state))
             
@@ -1462,242 +1498,35 @@ settings = {
     "max_log_size": 10    # 默认最大日志大小(MB)
 }
 
-def settings1():
-    """打开设置窗口，配置程序设置和日志选项"""
-    global settings_window
-    
-    # 读取allowthread.txt文件获取多线程下载设置
+def save_all_settings():
+    """保存所有设置到文件"""
     try:
-        thread_file = os.path.join(config_path, "allowthread.txt")
-        allow_multithreading = True  # 默认启用
-        if os.path.exists(thread_file):
-            with open(thread_file, "r") as r:
-                lines = r.readlines()
-                if lines:
-                    value = lines[-1].strip().lower()
-                    allow_multithreading = (value == "true")
-        settings["allow_multithreading"] = allow_multithreading
+        with open(os.path.join(config_path, "theme.txt"), "w") as f:
+            f.write(settings["theme"])
         
-        # 读取语言设置
-        language_file = os.path.join(config_path, "language.txt")
-        if os.path.exists(language_file):
-            with open(language_file, "r") as r:
-                lang = r.read().strip() or "zh_CN"
-                settings["language"] = lang
-                set_language(lang)  # 设置当前语言
+        with open(os.path.join(config_path, "pythonmirror.txt"), "w") as f:
+            f.write(settings["python_mirror"])
         
-        # 读取日志大小设置
-        log_size_file = os.path.join(config_path, "log_size.txt")
-        if os.path.exists(log_size_file):
-            with open(log_size_file, "r") as r:
-                size_str = r.read().strip()
-                if size_str and size_str.isdigit():
-                    settings["max_log_size"] = int(size_str)
+        with open(os.path.join(config_path, "pipmirror.txt"), "w") as f:
+            f.write(settings["pip_mirror"])
+        
+        with open(os.path.join(config_path, "allowthread.txt"), "w") as f:
+            f.write("True" if settings["allow_multithreading"] else "False")
+        
+        with open(os.path.join(config_path, "language.txt"), "w") as f:
+            f.write(settings["language"])
+        
+        with open(os.path.join(config_path, "log_size.txt"), "w") as f:
+            f.write(str(settings["max_log_size"]))
+        
+        with open(os.path.join(config_path, "allowupdatepip.txt"), "w") as f:
+            f.write("True" if settings["auto_check_pip"] else "False")
+            f.write("\n")
     except Exception as e:
-        logger.error(f"{get_text('settings_read_fail')}: {e}")
-    
-    # 简单、直接地创建窗口
-    settings_window = tk.Toplevel(root)
-    settings_window.title(get_text("settings"))
-    #settings_window.geometry("500x520")  # 增加窗口高度以容纳新选项
-    settings_window.resizable(True, True)  # 允许调整窗口大小
-    
-    # 设置为模态窗口
-    settings_window.transient(root)
-    settings_window.grab_set()
-    
-    # 创建主框架
-    main_frame = ttk.Frame(settings_window, padding=20)
-    main_frame.pack(expand=True, fill="both")
-    
-    # ===== 语言设置 =====
-    language_frame = ttk.LabelFrame(main_frame, text=get_text("language_settings"), padding=10)
-    language_frame.pack(fill="x", pady=(0, 15))
-    
-    language_var = tk.StringVar(value=settings.get("language", "zh_CN"))
-    ttk.Radiobutton(language_frame, text=get_text("simplified_chinese"), value="zh_CN", variable=language_var).pack(side="left", padx=20)
-    ttk.Radiobutton(language_frame, text=get_text("english"), value="en_US", variable=language_var).pack(side="left", padx=20)
-    
-    # ===== 主题设置 =====
-    theme_frame = ttk.LabelFrame(main_frame, text=get_text("theme_settings"), padding=10)
-    theme_frame.pack(fill="x", pady=(0, 15))
-    
-    theme_var = tk.StringVar(value=settings.get("theme", "light"))
-    ttk.Radiobutton(theme_frame, text=get_text("light_theme"), value="light", variable=theme_var).pack(side="left", padx=20)
-    ttk.Radiobutton(theme_frame, text=get_text("dark_theme"), value="dark", variable=theme_var).pack(side="left", padx=20)
-    
-    # ===== 镜像设置 =====
-    mirror_frame = ttk.LabelFrame(main_frame, text=get_text("download_mirror_settings"), padding=10)
-    mirror_frame.pack(fill="x", pady=(0, 15))
-    
-    # 获取镜像列表（不显示默认源）
-    python_default_mirror = "https://www.python.org/ftp/python"
-    # 获取其他预定义镜像和自定义镜像
-    python_other_mirrors = [m for m in PYTHON_MIRRORS if m != python_default_mirror]
-    custom_python_mirrors = get_custom_python_mirrors()
-    
-    python_all_mirrors = [get_text("default_source")] + python_other_mirrors + custom_python_mirrors
-    
-    # Python镜像选择
-    ttk.Label(mirror_frame, text=get_text("python_download_mirror")).grid(row=0, column=0, sticky="w", pady=5, padx=5)
-    python_mirror_var = tk.StringVar(value=settings.get("python_mirror", get_text("default_source")))
-    python_mirror_combo = ttk.Combobox(mirror_frame, textvariable=python_mirror_var, width=35, state="readonly")
-    python_mirror_combo["values"] = python_all_mirrors
-    python_mirror_combo.grid(row=0, column=1, sticky="w", pady=5, padx=5)
-    mirror_frame.columnconfigure(1, weight=1)
-    
-    # 添加Python默认源提示
-    ttk.Label(mirror_frame, text=f"{get_text('default_source')}: {python_default_mirror}").grid(row=1, column=0, columnspan=2, sticky="w", pady=(0, 5), padx=5)
-    
-    # 添加测试Python镜像按钮
-    ttk.Button(mirror_frame, text=get_text("test_python_mirror"), command=lambda: show_mirror_test_window("python")).grid(row=0, column=2, padx=5, pady=5)
-    
-    # Pip镜像
-    # 获取pip镜像列表（不显示默认源）
-    pip_default_mirror = PIP_MIRRORS[0]
-    pip_other_mirrors = PIP_MIRRORS[1:]
-    custom_pip_mirrors = get_custom_pip_mirrors()
-    
-    pip_all_mirrors = [get_text("default_source")] + pip_other_mirrors + custom_pip_mirrors
-    
-    ttk.Label(mirror_frame, text=get_text("pip_mirror")).grid(row=2, column=0, sticky="w", pady=5, padx=5)
-    pip_mirror_var = tk.StringVar(value=settings.get("pip_mirror", get_text("default_source")))
-    pip_mirror_combo = ttk.Combobox(mirror_frame, textvariable=pip_mirror_var, width=35, state="readonly")
-    pip_mirror_combo["values"] = pip_all_mirrors
-    pip_mirror_combo.grid(row=2, column=1, sticky="w", pady=5, padx=5)
-    
-    # 添加测试Pip镜像按钮
-    ttk.Button(mirror_frame, text=get_text("test_pip_mirror"), command=lambda: show_mirror_test_window("pip")).grid(row=2, column=2, padx=5, pady=5)
-    
-    # 添加Pip默认源提示
-    ttk.Label(mirror_frame, text=f"{get_text('default_source')}: {pip_default_mirror}").grid(row=3, column=0, columnspan=2, sticky="w", pady=(0, 5), padx=5)
-    
-    # ===== 日志设置 =====
-    log_frame = ttk.LabelFrame(main_frame, text=get_text("log_settings"), padding=10)
-    log_frame.pack(fill="x", pady=(0, 15))
-    
-    ttk.Label(log_frame, text=get_text("max_log_size")).grid(row=0, column=0, sticky="w", pady=5, padx=5)
-    log_size_var = tk.StringVar(value=str(settings.get("max_log_size", 10)))
-    log_size_combo = ttk.Combobox(log_frame, textvariable=log_size_var, width=10, state="readonly")
-    log_size_combo["values"] = ["5", "10", "20", "50", "100"]
-    log_size_combo.grid(row=0, column=1, sticky="w", pady=5, padx=5)
-    
-    # ===== 多线程设置 =====
-    other_frame = ttk.LabelFrame(main_frame, text=get_text("download_settings"), padding=10)
-    other_frame.pack(fill="x", pady=(0, 15))
-    
-    multithreading_var = tk.BooleanVar(value=settings.get("allow_multithreading", True))
-    ttk.Checkbutton(other_frame, text=get_text("enable_multithreading"), variable=multithreading_var).pack(anchor="w", padx=5)
-    
-    # 读取pip版本检查设置
-    auto_check_pip_var = tk.BooleanVar(value=True)  # 默认启用
-    try:
-        with open(os.path.join(config_path, "allowupdatepip.txt"), "r") as f:
-            lines = f.readlines()
-            if lines:
-                auto_check_pip_var.set(lines[0].strip().lower() == "true")
-    except Exception as e:
-        logger.error(f"读取pip版本检查设置失败: {e}")
-    
-    # 添加pip版本检查选项
-    ttk.Checkbutton(other_frame, text=get_text("enable_pip_version_check"), variable=auto_check_pip_var).pack(anchor="w", padx=5)
-    
-    # ===== 底部按钮 =====
-    button_frame = ttk.Frame(main_frame)
-    button_frame.pack(side="bottom", fill="x", pady=(10, 0))
-    
-    # 保存函数
-    def save_settings_func():
-        try:
-            old_language = settings.get("language", "zh_CN")
-            
-            # 更新设置字典
-            settings["theme"] = theme_var.get()
-            settings["python_mirror"] = python_mirror_var.get() if python_mirror_var.get() else get_text("default_source")
-            settings["pip_mirror"] = pip_mirror_var.get() if pip_mirror_var.get() else get_text("default_source")
-            settings["allow_multithreading"] = multithreading_var.get()
-            settings["language"] = language_var.get()
-            settings["max_log_size"] = int(log_size_var.get())
-            settings["auto_check_pip"] = auto_check_pip_var.get()
-            
-            # 保存设置到文件
-            with open(os.path.join(config_path, "theme.txt"), "w") as f:
-                f.write(settings["theme"])
-            
-            with open(os.path.join(config_path, "pythonmirror.txt"), "w") as f:
-                f.write(settings["python_mirror"])
-            
-            with open(os.path.join(config_path, "pipmirror.txt"), "w") as f:
-                f.write(settings["pip_mirror"])
-            
-            with open(os.path.join(config_path, "allowthread.txt"), "w") as f:
-                # 将布尔值转换为"True"或"False"字符串
-                f.write("True" if settings["allow_multithreading"] else "False")
-            
-            # 保存语言设置
-            with open(os.path.join(config_path, "language.txt"), "w") as f:
-                f.write(settings["language"])
-                
-            # 保存日志大小设置
-            with open(os.path.join(config_path, "log_size.txt"), "w") as f:
-                f.write(str(settings["max_log_size"]))
-            
-            # 保存pip版本检查设置
-            try:
-                # 保持当前版本信息不变
-                current_version = ""
-                with open(os.path.join(config_path, "allowupdatepip.txt"), "r") as f:
-                    lines = f.readlines()
-                    if len(lines) > 1:
-                        current_version = lines[1].strip()
-                
-                with open(os.path.join(config_path, "allowupdatepip.txt"), "w") as f:
-                    f.write("True" if settings["auto_check_pip"] else "False")
-                    f.write("\n")
-                    if current_version:
-                        f.write(current_version)
-            except Exception as e:
-                logger.error(f"保存pip版本检查设置失败: {e}")
-            
-            # 应用主题
-            sv_ttk.set_theme(settings["theme"])
-            
-            # 检查语言是否更改，如果更改了，设置新语言
-            if old_language != settings["language"]:
-                set_language(settings["language"])
-                # 显示需要重启的提示
-                restart_msg = get_text("language_changed")
-                
-                # 语言变更时强制重启应用以确保所有UI元素正确更新
-                messagebox.showinfo(get_text("success"), restart_msg, parent=settings_window)
-                settings_window.destroy()
-                # 重启应用程序
-                python = sys.executable
-                script = os.path.abspath(sys.argv[0])
-                root.destroy()  # 确保主窗口关闭
-                os.execl(python, python, script)
-            else:
-                # 没有更改语言，使用当前语言显示消息
-                messagebox.showinfo(get_text("success"), get_text("settings_saved"), parent=settings_window)
-        except Exception as e:
-            logger.error(f"{get_text('settings_save_fail')}: {e}")
-            messagebox.showwarning(get_text("warning_code"), get_text("save_failed").format(e), parent=settings_window)
-    
-    # 添加按钮
-    ttk.Button(button_frame, text=get_text("cancel"), command=settings_window.destroy).pack(side="right", padx=5)
-    ttk.Button(button_frame, text=get_text("save"), command=save_settings_func).pack(side="right", padx=5)
-    
-    # 居中显示窗口
-    settings_window.update_idletasks()
-    width = settings_window.winfo_width()
-    height = settings_window.winfo_height()
-    x = (root.winfo_screenwidth() // 2) - (width // 2)
-    y = (root.winfo_screenheight() // 2) - (height // 2)
-    #settings_window.geometry(f'{width}x{height}+{x}+{y}')
-    
-    # 设置窗口关闭事件并设置焦点
-    settings_window.protocol("WM_DELETE_WINDOW", settings_window.destroy)
-    settings_window.focus_set()
+        logger.error(f"保存设置到文件失败: {e}")
+
+
+
 
 def show_debug_info():
     """显示调试信息窗口，包含系统信息和应用信息"""
@@ -2557,6 +2386,35 @@ def show_mirror_test_window(mirror_type="python"):
     参数:
         mirror_type (str): 镜像类型，'python'或'pip'
     """
+    try:
+        # 获取配置路径
+        version_pyquick = "2020"
+        config_path_base = os.path.join(os.environ["APPDATA"], "pyquick")
+        config_path = os.path.join(config_path_base, version_pyquick)
+        
+        # 导入mirror_test模块中的函数
+        try:
+            from mirror_test import show_mirror_test_window as show_test_window
+            # 调用mirror_test中的函数
+            show_test_window(
+                parent=root,
+                mirror_type=mirror_type,
+                config_path=config_path
+            )
+        except ImportError as e:
+            logger.error(f"导入mirror_test模块失败: {e}")
+            messagebox.showerror(get_text("error"), get_text("mirror_test_window_error").format(str(e)))
+    except Exception as e:
+        logger.error(f"打开镜像测试窗口失败: {e}")
+        messagebox.showerror(get_text("error"), get_text("mirror_test_window_error").format(str(e)))
+
+# 重命名原来的函数为内置备用函数
+def _show_mirror_test_window_builtin(mirror_type="python"):
+    """显示内置的镜像测试窗口
+    
+    参数:
+        mirror_type (str): 镜像类型，'python'或'pip'
+    """
     test_window = tk.Toplevel(root)
     test_window.title(get_text("test_mirror_delay").format("Python" if mirror_type == "python" else "Pip"))
     test_window.resizable(True, True)  # 允许调整窗口大小
@@ -2821,7 +2679,7 @@ def update_interface_language():
     
     try:
         # 更新窗口标题
-        root.title(show_name())
+        safe_config(root, title=show_name())
         
         # Notebook标签不能直接更新，需要移除再添加
         # 保存当前选中的标签索引
@@ -2843,49 +2701,52 @@ def update_interface_language():
                 note.select(current_tab)
         
         # 更新菜单文本
-        menubar.entryconfig(0, label=get_text("settings_menu"))
-        menubar.entryconfig(1, label=get_text("help_menu"))
+        safe_config(menubar, tearoff=0, label=get_text("settings_menu"))
+        safe_config(menubar, tearoff=0, label=get_text("help_menu"))
         
-        help_menu.entryconfig(0, label=get_text("about"))
-        help_menu.entryconfig(2, label=get_text("debug_info"))
+        safe_config(help_menu, tearoff=0, label=get_text("about"))
+        safe_config(help_menu, tearoff=0, label=get_text("debug_info"))
         
-        settings_menu.entryconfig(0, label=get_text("settings"))
+        safe_config(settings_menu, tearoff=0, label=get_text("settings"))
         
         # 更新Python下载标签
-        version_label.config(text=get_text("select_python_version"))
-        destination_label.config(text=get_text("select_destination"))
-        thread_label.config(text=get_text("select_thread_number"))
-        download_label.config(text=get_text("choose_download_file"))
+        safe_config(version_label, text=get_text("select_python_version"))
+        safe_config(destination_label, text=get_text("select_destination"))
+        safe_config(thread_label, text=get_text("select_thread_number"))
+        safe_config(download_label, text=get_text("choose_download_file"))
         
         # 更新按钮文本
-        version_reload_button.config(text=get_text("reload"))
-        select_button.config(text=get_text("select_path"))
-        download_button.config(text=get_text("download"))
-        cancel_button.config(text=get_text("cancel_download"))
-        pause_button.config(text=get_text("pause_download"))
+        safe_config(version_reload_button, text=get_text("reload"))
+        safe_config(select_button, text=get_text("select_path"))
+        safe_config(download_button, text=get_text("download"))
+        safe_config(cancel_button, text=get_text("cancel_download"))
+        safe_config(pause_button, text=get_text("pause_download"))
         
         # 更新Pip管理界面
-        pip_upgrade_button.config(text=get_text("pip_version"))
-        pip_retry_button.config(text=get_text("retry"))
-        package_label.config(text=get_text("enter_package_name"))
-        install_button.config(text=get_text("install_package"))
-        uninstall_button.config(text=get_text("uninstall_package"))
-        upgrade_button.config(text=get_text("upgrade_package"))
+        safe_config(pip_upgrade_button, text=get_text("pip_version"))
+        safe_config(pip_retry_button, text=get_text("retry"))
+        safe_config(package_label, text=get_text("enter_package_name"))
+        safe_config(install_button, text=get_text("install_package"))
+        safe_config(uninstall_button, text=get_text("uninstall_package"))
+        safe_config(upgrade_button, text=get_text("upgrade_package"))
         
         # 更新状态标签文本，如果当前显示的是语言字典中的文本
         def update_label_text(label):
             if not label:
                 return
                 
-            current_text = label.cget("text")
-            if current_text:
-                # 检查当前文本是否能在当前语言中找到
-                for lang in texts:
-                    for key, value in texts[lang].items():
-                        if current_text == value:
-                            # 找到匹配项，更新为新语言的文本
-                            label.config(text=get_text(key))
-                            break
+            try:
+                current_text = label.cget("text")
+                if current_text:
+                    # 检查当前文本是否能在当前语言中找到
+                    for lang in texts:
+                        for key, value in texts[lang].items():
+                            if current_text == value:
+                                # 找到匹配项，更新为新语言的文本
+                                safe_config(label, text=get_text(key))
+                                break
+            except tk.TclError as e:
+                logger.warning(f"更新标签文本失败: {e}")
         
         # 更新两个状态标签
         update_label_text(status_label)
@@ -2894,9 +2755,113 @@ def update_interface_language():
         logger.info(f"界面语言已更新为: {current_language}")
     except Exception as e:
         logger.error(f"更新界面语言失败: {e}")
-        messagebox.showerror(get_text("error"), get_text("update_language_failed").format(str(e)))
+        safe_ui_update(root, messagebox.showerror, get_text("error"), get_text("update_language_failed").format(str(e)))
+
+# 在utils.py中添加异常钩子
+def setup_thread_exception_hook():
+    """设置线程异常钩子以捕获和记录所有线程异常"""
+    old_init = threading.Thread.__init__
+    
+    def new_init(self, *args, **kwargs):
+        old_init(self, *args, **kwargs)
+        old_run = self.run
+        
+        def run_with_exception_logging(*args, **kwargs):
+            try:
+                old_run(*args, **kwargs)
+            except Exception as e:
+                logger.error(f"线程 {self.name} 发生未捕获异常: {e}")
+                logger.error(traceback.format_exc())
+        
+        self.run = run_with_exception_logging
+    
+    threading.Thread.__init__ = new_init
+
+# 在应用启动时调用
+setup_thread_exception_hook()
+
+def initialize_version_management():
+    """初始化版本管理"""
+    # 创建后台更新线程
+    def version_monitor_thread():
+        while True:
+            try:
+                # 检查Python版本更新
+                if root and root.winfo_exists():
+                    root.after(0, lambda: update_python_versions())
+                
+                # 检查pip版本更新 
+                if root and root.winfo_exists():
+                    root.after(0, lambda: update_pip_versions())
+                
+                # 每5分钟检查一次
+                time.sleep(300)
+            except Exception as e:
+                logger.error(f"版本监控线程出错: {e}")
+                time.sleep(10)  # 出错后等待较短时间再重试
+    
+    # 启动监控线程
+    threading.Thread(target=version_monitor_thread, daemon=True).start()
+
+def update_python_versions():
+    """更新Python版本列表"""
+    try:
+        if version_combobox.get() == get_text("loading_versions"):
+            return
+            
+        version_combobox.config(values=[get_text("loading_versions")], state="disabled")
+        
+        def load_thread():
+            try:
+                versions = get_python_versions()
+                
+                def update_ui():
+                    if not versions:
+                        version_combobox.config(
+                            values=[get_text("no_python_versions")],
+                            state="disabled"
+                        )
+                        safe_config(status_label, text=get_text("no_python_versions"))
+                    else:
+                        version_combobox.config(values=versions, state="readonly")
+                        # 保持当前选择
+                        current = version_combobox.get()
+                        if current in versions:
+                            version_combobox.set(current)
+                        elif versions:
+                            version_combobox.set(versions[0])
+                
+                if root and root.winfo_exists():
+                    root.after(0, update_ui)
+                    
+            except Exception as e:
+                logger.error(f"加载Python版本失败: {e}")
+                if root and root.winfo_exists():
+                    root.after(0, lambda: version_combobox.config(
+                        values=[get_text("python_version_load_failed")],
+                        state="disabled"
+                    ))
+        
+        threading.Thread(target=load_thread, daemon=True).start()
+        
+    except Exception as e:
+        logger.error(f"更新Python版本UI失败: {e}")
+
+def update_pip_versions():
+    """更新pip版本列表"""
+    from pip.check_ver import update_pip_versions_ui
+    if pip_version_combobox.winfo_exists():
+        update_pip_versions_ui(config_path, pip_version_combobox)
 
 if __name__ == "__main__":
+    # 获取系统build版本
+    build = 0
+    try:
+        build = get_system_build()
+    except Exception as e:
+        logger.error(f"获取系统build版本失败: {e}")
+        build = 22000  # 默认给一个较高的值，确保程序能运行
+        
     if datetime.datetime.now() >= datetime.datetime(2025, 8, 13):
         subprocess.Popen([sys.executable,show(code="0x0000001A", mode="err", info="Pyquick is expired.")],creationflags=subprocess.CREATE_NO_WINDOW,shell=True)
         # 使用线程保持主程序运行
@@ -2909,30 +2874,42 @@ if __name__ == "__main__":
     elif build<22000 and build>18363:
         threading.Thread(target=lambda: logger.info(get_text("app_info_log")), daemon=True).start()
     root = tk.Tk()
-
     root.title(show_name())
-    #root.attributes('-topmost', True)
     root.resizable(False, False)
+    
+    # 确保窗口图标
     icon_path = os.path.join(MY_PATH, 'pyquick.ico')
-    
     if os.path.exists(icon_path):
-        root.iconbitmap(icon_path)
-    menubar = tk.Menu(root)
-    root.config(menu=menubar)
-    root.protocol("WM_DELETE_WINDOW", on_closing)
-    # 添加 Help 菜单项
-    help_menu = tk.Menu(menubar, tearoff=0)
-    settings_menu = tk.Menu(menubar, tearoff=0)
+        try:
+            root.iconbitmap(icon_path)
+        except:
+            logger.warning("Failed to load window icon")
     
+    # 创建菜单栏并确保其可见性
+    menubar = tk.Menu(root)
+    root.config(menu=menubar)  # 这行代码确保菜单栏附加到窗口
+    
+    # 添加调试日志
+    logger.info("Creating menu bar with settings and help menus")
+    
+    # 创建设置菜单
+    settings_menu = tk.Menu(menubar, tearoff=0)
     menubar.add_cascade(label=get_text("settings_menu"), menu=settings_menu)
+    from settings_ui import show_settings_window
+    settings_menu.add_command(label=get_text("settings"), command=lambda: show_settings_window(root, config_path, lambda: os.execl(sys.executable, sys.executable, *sys.argv)))
+    
+    # 创建帮助菜单
+    help_menu = tk.Menu(menubar, tearoff=0)
     menubar.add_cascade(label=get_text("help_menu"), menu=help_menu)
-
     help_menu.add_command(label=get_text("about"), command=show_about)
     help_menu.add_separator()
     help_menu.add_command(label=get_text("debug_info"), command=show_debug_info)
     
-    # 同时添加两个设置选项，一个复杂一个简单
-    settings_menu.add_command(label=get_text("settings"), command=settings1)
+    # 确保窗口关闭处理
+    root.protocol("WM_DELETE_WINDOW", on_closing)
+    
+    # 调试：打印菜单结构
+    logger.debug(f"Menu bar created with items: {menubar.index('end')}")
     
 
     note = ttk.Notebook(root)
@@ -2940,70 +2917,70 @@ if __name__ == "__main__":
     pip_frame = ttk.Frame(note, padding="10")
     note.add(download_frame, text=get_text("python_download"))
     note.add(pip_frame, text=get_text("pip_management"))
-    note.grid(padx=10, pady=10, row=0, column=0)
+    safe_grid(note, padx=10, pady=10, row=0, column=0)
 
     # Python Download Frame
     version_label = ttk.Label(download_frame, text=get_text("select_python_version"))
-    version_label.grid(row=0, column=0, pady=10,padx=10, sticky="e")
+    safe_grid(version_label, row=0, column=0, pady=10,padx=10, sticky="e")
 
     
 
-
+    
 
     version_combobox = ttk.Combobox(download_frame, values=[''], state="readonly")
-    version_combobox.grid(row=0, column=1, pady=10, padx=10, sticky="w")
+    safe_grid(version_combobox, row=0, column=1, pady=10, padx=10, sticky="w")
     version_combobox.current(0)
 
     version_reload_button = ttk.Button(download_frame, text=get_text("reload"), command=python_version_reload)
-    version_reload_button.grid(row=0, column=2, pady=10, padx=10, sticky="w")
+    safe_grid(version_reload_button, row=0, column=2, pady=10, padx=10, sticky="w")
 
 
     destination_label = ttk.Label(download_frame, text=get_text("select_destination"))
-    destination_label.grid(row=1, column=0, pady=10,padx=10, sticky="e")
+    safe_grid(destination_label, row=1, column=0, pady=10,padx=10, sticky="e")
 
 
     destination_entry = ttk.Entry(download_frame, width=60)
-    destination_entry.grid(row=1, column=1, pady=10, padx=10, sticky="w")
+    safe_grid(destination_entry, row=1, column=1, pady=10, padx=10, sticky="w")
 
 
     select_button = ttk.Button(download_frame, text=get_text("select_path"), command=select_destination)
-    select_button.grid(row=1, column=2, pady=10, padx=10, sticky="w")
+    safe_grid(select_button, row=1, column=2, pady=10, padx=10, sticky="w")
 
     thread_label = ttk.Label(download_frame, text=get_text("select_thread_number"))
-    thread_label.grid(row=2, column=0, pady=10,padx=10, sticky="e")
+    safe_grid(thread_label, row=2, column=0, pady=10,padx=10, sticky="e")
 
     thread_combobox = ttk.Combobox(download_frame, values=[str(i) for i in range(1, 129)], state="readonly")
-    thread_combobox.grid(row=2, column=1, pady=10, padx=10, sticky="w")
+    safe_grid(thread_combobox, row=2, column=1, pady=10, padx=10, sticky="w")
     thread_combobox.current(9)  # Default to 32 threads
 
     download_label= ttk.Label(download_frame, text=get_text("choose_download_file"))
-    download_label.grid(row=3, column=0, pady=10,padx=10, sticky="e")
+    safe_grid(download_label, row=3, column=0, pady=10,padx=10, sticky="e")
 
     
     download_file_combobox = ttk.Combobox(download_frame, values=[''], state="readonly",width=40)
-    download_file_combobox.grid(row=3, column=1, pady=10, padx=10, sticky="w")
+    safe_grid(download_file_combobox, row=3, column=1, pady=10, padx=10, sticky="w")
     
 
     download_button = ttk.Button(download_frame, text=get_text("download"), command=download_selected_version)
-    download_button.grid(row=4, column=0, columnspan=3, pady=10, padx=10)
+    safe_grid(download_button, row=4, column=0, columnspan=3, pady=10, padx=10)
 
     
     # 取消下载按钮
     cancel_button = ttk.Button(download_frame, text=get_text("cancel_download"), command=cancel_download)
-    cancel_button.grid_forget()
+    safe_grid_forget(cancel_button)
     
     # 暂停/恢复下载按钮
     pause_button = ttk.Button(download_frame, text=get_text("pause_download"), command=pause_resume_download)
-    pause_button.grid_forget()
+    safe_grid_forget(pause_button)
 
     # 下载进度
     progress_bar = ttk.Progressbar(download_frame, orient='horizontal', length=300, mode='determinate')
-    progress_bar.grid(row=7, column=0, columnspan=3, pady=10, padx=10)
+    safe_grid(progress_bar, row=7, column=0, columnspan=3, pady=10, padx=10)
 
 
     # 下载状态
     status_label = ttk.Label(download_frame, text="", padding="5")
-    status_label.grid(row=8, column=0, columnspan=3, pady=10, padx=10)
+    safe_grid(status_label, row=8, column=0, columnspan=3, pady=10, padx=10)
 
 
 
@@ -3012,8 +2989,21 @@ if __name__ == "__main__":
 
 
     # pip Management Frame
+    pip_version_label = ttk.Label(pip_frame, text=get_text("select_pip_version"))
+    safe_grid(pip_version_label, row=0, column=0, pady=10, padx=10, sticky="e")
+
+    pip_version_combobox = ttk.Combobox(pip_frame, values=[''], state="readonly")
+    safe_grid(pip_version_combobox, row=0, column=1, pady=10, padx=10, sticky="w")
+    pip_version_combobox.current(0)
+
+    pip_version_reload_button = ttk.Button(pip_frame, text=get_text("reload"), command=update_pip_versions)
+    safe_grid(pip_version_reload_button, row=0, column=2, pady=10, padx=10, sticky="w")
+
     pip_upgrade_button = ttk.Button(pip_frame, text=get_text("pip_version"), command=lambda: upgrade_pip(pip_upgrade_button, package_entry, install_button, uninstall_button, upgrade_button, pip_progress_bar, package_status_label, config_path, root))
-    pip_upgrade_button.grid(row=0, column=0, columnspan=3, pady=10, padx=10)
+    ttk.Separator(pip_frame, orient='horizontal').grid(row=3, column=0, columnspan=3, sticky='ew', pady=10)
+    status_label = ttk.Label(pip_frame, foreground='green')
+    status_label.grid(row=4, column=0, columnspan=3)
+    safe_grid(pip_upgrade_button, row=0, column=0, columnspan=3, pady=10, padx=10)
 
     # 创建重试按钮但默认不显示
     pip_retry_button = ttk.Button(pip_frame, text=get_text("retry"), command=retry_pip_ui)
@@ -3023,30 +3013,30 @@ if __name__ == "__main__":
 
 
     package_label = ttk.Label(pip_frame, text=get_text("enter_package_name"))
-    package_label.grid(row=2, column=0, pady=10, padx=10, sticky="e")
+    safe_grid(package_label, row=2, column=0, pady=10, padx=10, sticky="e")
 
 
     package_entry = ttk.Entry(pip_frame, width=80)
-    package_entry.grid(row=2, column=1, pady=10, padx=10, sticky="w")
+    safe_grid(package_entry, row=2, column=1, pady=10, padx=10, sticky="w")
 
 
     install_button = ttk.Button(pip_frame, text=get_text("install_package"), command=install_package_ui)
-    install_button.grid(row=3, column=0, columnspan=3, pady=10, padx=10)
+    safe_grid(install_button, row=3, column=0, columnspan=3, pady=10, padx=10)
 
 
     uninstall_button = ttk.Button(pip_frame, text=get_text("uninstall_package"), command=uninstall_package_ui)
-    uninstall_button.grid(row=4, column=0, columnspan=3, pady=10, padx=10)
+    safe_grid(uninstall_button, row=4, column=0, columnspan=3, pady=10, padx=10)
 
     upgrade_button=ttk.Button(pip_frame,text=get_text("upgrade_package"),command=upgrade_package_ui)
-    upgrade_button.grid_forget()
+    safe_grid_forget(upgrade_button)
 
     pip_progress_bar=ttk.Progressbar(pip_frame, orient='horizontal', length=300, mode='indeterminate')
-    pip_progress_bar.grid_forget()
+    safe_grid_forget(pip_progress_bar)
     pip_progress_bar['value']=0
 
 
     package_status_label = ttk.Label(pip_frame, text="", padding="5")
-    package_status_label.grid(row=7, column=0, columnspan=3, pady=10, padx=10)
+    safe_grid(package_status_label, row=7, column=0, columnspan=3, pady=10, padx=10)
     
     
 
@@ -3090,81 +3080,81 @@ if __name__ == "__main__":
                 update_interface_language()  # 在启动时应用语言设置
     except Exception as e:
         logger.error(f"加载语言设置失败: {e}")
-    
+
     # 添加版本选择事件处理
     def on_version_selected(event):
         """版本选择处理函数，加载对应版本的文件列表"""
         selected_version = version_combobox.get()
-        if selected_version:
-            # 清空文件列表并禁用下拉框
-            download_file_combobox.set("")
-            download_file_combobox.config(values=[""], state="disabled")
-            
-            # 显示进度条（不定时模式）
-            progress_bar.config(mode="indeterminate")
-            progress_bar.start(15)  # 设置更快的速度
-            
-            # 更新状态标签
-            status_label.config(text=get_text("loading_files"))
-            
-            # 使用线程加载文件列表，避免UI冻结
-            def load_files_thread():
-                try:
-                    logger.info(f"加载版本 {selected_version} 的文件列表")
-                    python_mirror = read_python_mirror()
-                    if python_mirror and python_mirror != "https://www.python.org/ftp/python":
-                        url = f"{python_mirror}/{selected_version}/"
-                    else:
-                        # 使用默认镜像
-                        url = f"https://www.python.org/ftp/python/{selected_version}/"
-                    
-                    file_list = python_dowload_url_reload(url)
-                    
-                    # 更新UI (在主线程中)
-                    root.after(0, lambda: update_file_list(file_list))
-                except Exception as e:
-                    logger.error(f"加载文件列表失败: {e}")
-                    # 更新UI显示错误
-                    root.after(0, lambda: progress_bar.stop())
-                    root.after(0, lambda: progress_bar.config(mode="determinate", value=0))
-                    root.after(0, lambda: status_label.config(text=get_text("loading_file_failed").format(e)))
-                    root.after(0, lambda: download_file_combobox.config(state="readonly"))
-                    root.after(5000, lambda: status_label.config(text=""))
-            
-            # 启动线程
-            threading.Thread(target=load_files_thread, daemon=True).start()
-    
-    def update_file_list(file_list):
-        """更新文件列表下拉框"""
-        # 停止进度条
-        progress_bar.stop()
-        progress_bar.config(mode="determinate", value=0)
+        if not selected_version or selected_version == get_text("loading_files"):
+            return
         
-        if file_list and len(file_list) > 0:
-            # 过滤掉含有"macos"的文件
+        safe_config(status_label, text=get_text("loading_file_list"))
+        safe_config(download_file_combobox, state="disabled")
+        
+            # 使用线程加载文件列表
+        def load_files_thread():
+            try:
+                file_list = python_dowload_url_reload(selected_version)
+                # 在主线程中更新UI
+                root.after(0, lambda: update_file_list(file_list))
+            except Exception as e:
+                logger.error(f"加载文件列表时出错: {e}")
+                # 在主线程中更新UI错误状态
+                root.after(0, lambda: safe_config(status_label, text=get_text("load_files_failed")))
+            root.after(0, lambda: safe_config(download_file_combobox, state="readonly"))
+
+        threading.Thread(target=load_files_thread, daemon=True).start()
+    
+    # 文件列表更新函数
+    def update_file_list(file_list):
+        if not file_list:
+            safe_config(download_file_combobox, values=[get_text("no_files_found")])
+            safe_config(status_label, text=get_text("no_files_found"))
+            logger.warning("未找到任何文件")
+        else:
+            # 过滤出不含"macos"的文件
             filtered_list = [f for f in file_list if "macos" not in f.lower()]
             
             if filtered_list:
-                download_file_combobox.config(values=filtered_list)
-                download_file_combobox.set("")  # 清空当前选择
-                status_label.config(text=get_text("found_files").format(len(filtered_list)))
-                logger.info(f"加载了 {len(filtered_list)} 个可下载文件")
+                safe_config(download_file_combobox, values=filtered_list)
+                safe_config(download_file_combobox, current=0)
+                safe_config(status_label, text=get_text("file_list_loaded"))
+                logger.info(f"已加载{len(filtered_list)}个文件")
             else:
-                download_file_combobox.config(values=[get_text("no_files_found")])
-                status_label.config(text=get_text("no_files_found"))
+                safe_config(download_file_combobox, values=[get_text("no_files_found")])
+                safe_config(status_label, text=get_text("no_files_found"))
                 logger.warning("过滤后没有可用的安装文件")
-        else:
-            download_file_combobox.config(values=[get_text("no_files_found")])
-            status_label.config(text=get_text("no_files_found"))
-            logger.warning("未找到任何文件")
         
         # 启用下拉框
-        download_file_combobox.config(state="readonly")
+        safe_config(download_file_combobox, state="readonly")
         
         # 5秒后清除状态
-        root.after(5000, lambda: status_label.config(text=""))
+        root.after(5000, lambda: safe_config(status_label, text=""))
     
     # 绑定版本选择事件
     version_combobox.bind("<<ComboboxSelected>>", on_version_selected)
 
+    # 在关闭程序时确保所有线程安全退出
+    def on_closing():
+        # 设置全局标志，所有线程在循环中检查此标志
+        global app_running
+        app_running = False
+        
+        # 等待一段时间让后台线程完成工作
+        time.sleep(0.5)
+        
+        # 销毁窗口
+        root.destroy()
+
+    # 在线程循环中检查标志
+    app_running = True
+    
+    # 删除这里的无限循环，它会阻塞主线程
+    # while app_running:
+    #     # 执行任务
+    #     if not app_running:
+    #         break
+
+    # 启动主循环
+    initialize_version_management()
     root.mainloop()

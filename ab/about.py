@@ -1,76 +1,87 @@
-import sys
-from PyQt6.QtWidgets import *
-from PyQt6.QtCore import *
-from PyQt6.QtGui import *
-from qfluentwidgets import *
+import tkinter as tk
+from tkinter import ttk
 import datetime
+import os
+import sys
 
-class AboutWindow(QWidget):
-    def __init__(self):
-        super().__init__()
-        self.setWindowTitle("About")
-        self.setWindowIcon(QIcon("pyquick.ico"))
-        self.initUI()
-
-    def initUI(self):
-        view=QWidget()
-        scrollArea = SingleDirectionScrollArea(orient=Qt.Orientation.Vertical)
-        scrollArea.resize(200, 400)
-        with open("gpl3.txt", "r") as f:
-            self.gpl=f.read()
-        self.textEdit = TextEdit()
-        self.textEdit.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout = QVBoxLayout()
+class AboutWindow:
+    def __init__(self, parent):
+        self.parent = parent
+        self.window = tk.Toplevel(parent)
+        self.window.title("About PyQuick")
+        self.window.resizable(False, False)
+        
+        # Calculate remaining days
         self.remin = (datetime.datetime(2025, 8, 13) - datetime.datetime.now()).days
-        self.image = ImageLabel("magic.png")
-        self.image.setBorderRadius(8, 8, 8, 8)
-        self.link=HyperlinkLabel(QUrl('https://github.com/pyquick/pyquick/'), 'This Project')
-        self.pyquick=SubtitleLabel("PyQuick")
-        self.version=StrongBodyLabel("Version: Dev (App build:2020) ")
-        self.ex=StrongBodyLabel(f"Expiration time: 2025.8.13 ({self.remin} days)")
-        self.gp=BodyLabel("GNU GENERAL PUBLIC LICENSE:\n")
-        self.pq=CaptionLabel("®Pyquick™ 2025. All rights reserved.")
-        self.ok=PushButton("OK")
-        self.ok.setFixedWidth(120)
-        self.ok.clicked.connect(self.close)
-        if self.remin<=14:
-            self.warnings = BodyLabel("⚠️ This Version Will Expire SOON! Please Upgrade this quickly.")
-            self.warnings.setTextColor(QColor(255,0,0))
-        self.dev1=BodyLabel("⚠️The Dev version is not stable.")
-        self.dev2=BodyLabel("If there is any problem, please post the problem immediately to the issues.")
-        self.dev1.setTextColor(QColor(255,0,0))
-        self.dev2.setTextColor(QColor(255,0,0))
-        self.textEdit.setPlainText(self.gpl)
-        self.textEdit.setReadOnly(True)
-        self.textEdit.setFontPointSize(300)
-        layout.addWidget(self.image,0,Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(self.link,0,Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(self.pyquick,0,Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(self.version,0,Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(self.ex,0,Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(self.gp,0,Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(self.textEdit)
-        layout.addWidget(self.dev1,0,Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(self.dev2,0,Qt.AlignmentFlag.AlignCenter)
-        if self.remin<=14:
-            layout.addWidget(self.warnings,0,Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(self.pq)
-        layout.addWidget(self.ok,0,Qt.AlignmentFlag.AlignRight)
-        self.setLayout(layout)
-        scrollArea.setWidget(view)
+        
+        # Create main frame
+        main_frame = ttk.Frame(self.window, padding="10")
+        main_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Add image if exists (without Pillow)
+        if os.path.exists("magic.png"):
+            try:
+                self.photo = tk.PhotoImage(file="magic.png")
+                img_label = ttk.Label(main_frame, image=self.photo)
+                img_label.pack(pady=5)
+            except:
+                pass  # Skip image if not supported format
+        
+        # Add title and version info
+        ttk.Label(main_frame, text="PyQuick", font=('Helvetica', 14, 'bold')).pack(pady=5)
+        ttk.Label(main_frame, text="Version: Dev (App build:2020)").pack()
+        ttk.Label(main_frame, text=f"Expiration time: 2025.8.13 ({self.remin} days)").pack()
+        
+        # Add license info
+        ttk.Label(main_frame, text="\nGNU GENERAL PUBLIC LICENSE:", font=('Helvetica', 10)).pack()
+        
+        # Add license text
+        license_text = tk.Text(main_frame, height=10, width=50, wrap=tk.WORD)
+        license_text.pack(fill=tk.BOTH, expand=True, pady=5)
+        
+        # Read license file if exists
+        if os.path.exists("gpl3.txt"):
+            try:
+                with open("gpl3.txt", "r") as f:
+                    license_text.insert(tk.END, f.read())
+            except:
+                license_text.insert(tk.END, "License text not available")
+        
+        license_text.config(state=tk.DISABLED)
+        
+        # Add warning if close to expiration
+        if self.remin <= 14:
+            ttk.Label(main_frame, 
+                     text="⚠️ This Version Will Expire SOON! Please Upgrade this quickly.",
+                     foreground="red").pack()
+        
+        # Add dev warning
+        ttk.Label(main_frame, text="⚠️ The Dev version is not stable.", foreground="red").pack()
+        ttk.Label(main_frame, 
+                 text="If there is any problem, please post the problem immediately to the issues.",
+                 foreground="red").pack()
+        
+        # Add copyright
+        ttk.Label(main_frame, text="\n®Pyquick™ 2025. All rights reserved.", font=('Helvetica', 8)).pack()
+        
+        # Add OK button
+        ttk.Button(main_frame, text="OK", command=self.window.destroy).pack(pady=10)
 
-
-
-
-def show():
-    app = QApplication(sys.argv)
-    window = AboutWindow()
-    window.show()
-    app.exec()  # 修改为不退出主进程
-    return window
+def show(parent=None):
+    if parent is None:
+        parent = tk.Tk()
+        parent.withdraw()
+    
+    about_window = AboutWindow(parent)
+    parent.wait_window(about_window.window)
+    
+    if parent.winfo_viewable():
+        parent.deiconify()
+    
+    return about_window
 
 if __name__ == "__main__":
-    app = QApplication(sys.argv)
-    window = AboutWindow()
-    window.show()
-    sys.exit(app.exec())
+    root = tk.Tk()
+    root.withdraw()
+    show(root)
+    root.mainloop()
