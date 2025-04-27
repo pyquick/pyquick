@@ -1,9 +1,14 @@
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
+from turtle import fillcolor
 package_entry = None
 import subprocess
 import os
 import threading
+from concurrent.futures import ThreadPoolExecutor, Future, as_completed
+import queue
+import time
+import logging
 from xml.sax.handler import property_xml_string
 from cryptography.fernet import Fernet
 import requests
@@ -11,21 +16,40 @@ import proxy
 from get_system_build import block_features
 import darkdetect
 import re
-import time
 from save_path import create_folder,sav_path
 requests.packages.urllib3.disable_warnings()
 import sv_ttk
-import logging
 import datetime
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from bs4 import BeautifulSoup
 import sys
 import importlib
 import pip_manager  # 导入pip管理模块
 import settings.settings_manager as settings_manager  # 导入设置管理模块
+from downloader import Downloader, DownloadManager  # 导入下载器模块
+
+# 配置日志记录
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('pyquick.log'),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger('pyquick')
+
+# 全局线程池
+THREAD_POOL = ThreadPoolExecutor(max_workers=10, thread_name_prefix="PyquickWorker")
+# UI更新队列
+UI_UPDATE_QUEUE = queue.Queue()
+
 config_path=create_folder.get_path("pyquick","1965")
 cancel_event = threading.Event()
 create_folder.folder_create("pyquick","1965")
+
+# 全局变量
+download_manager = None  # 下载管理器实例
+current_task_id = None   # 当前下载任务ID
 
 def install_package(package):
     try:
@@ -41,53 +65,131 @@ def install_package(package):
 # 自动安装依赖
 install_package("memory_profiler")
 from debug_info.ui import DebugInfoWindow
-
+# 排序版本获取结果
+def sort_results(results: list):
+    _results = results.copy()
+    length = len(_results)
+    for i in range(length):
+        for ii in range(0, length - i - 1):
+            v1 = Version(_results[ii])
+            v2 = Version(_results[ii + 1])
+            if v1 < v2:
+                _results[ii], _results[ii + 1] = _results[ii + 1], _results[ii]
+    version_combobox.configure(values=_results)
+    with open(os.path.join(config_path, "version.txt"), "w") as f:
+        f.write(str(_results))
 def python_version_reload():
     global is_reloading
     def thread():
         global is_reloading
-        url=f"https://www.python.org/ftp/python/"
-        is_reloading=True
-        version_reload.config(text="Reloading...",state="disabled")
-        try:
-            with requests.get(url,verify=False) as r:
-                bs = BeautifulSoup(r.content, "lxml")
+        url = "https://www.python.org/ftp/python/"
+        is_reloading = True
+        version_reload.config(text="Reloading...", state="disabled")
+        
+        # 设置重试次数和延迟
+        max_retries = 3
+        retry_delay = 1
+        
+        for attempt in range(max_retries):
+            try:
+                # 配置requests会话
+                session = requests.Session()
+                session.verify = False
+                session.headers.update({
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                })
+                
+                response = session.get(url, timeout=10)
+                response.raise_for_status()
+                
+                bs = BeautifulSoup(response.content, "lxml")
                 results = []
                 for i in bs.find_all("a"):
                     if i.text[0].isnumeric():
                         results.append(i.text[:-1])
+                        
                 if results:
                     version_reload.config(text="Sorting...")
-                    is_reloading=False
+                    is_reloading = False
                     sort_results(results)
-        except Exception as e:
-            logging.error(f"Python Version Reload Wrong:{e}")
-    threadings=threading.Thread(target=thread)
-    threadings.start()
+                    version_reload.config(text="Reload", state="normal")
+                    break
+                    
+            except requests.exceptions.SSLError as e:
+                logging.error(f"SSL Error (attempt {attempt + 1}/{max_retries}): {e}")
+            except requests.exceptions.RequestException as e:
+                logging.error(f"Request Error (attempt {attempt + 1}/{max_retries}): {e}")
+            except Exception as e:
+                logging.error(f"Unexpected Error (attempt {attempt + 1}/{max_retries}): {e}")
+                
+            if attempt < max_retries - 1:
+                time.sleep(retry_delay)
+                retry_delay *= 2  # 指数退避
+            else:
+                version_reload.config(text="Reload failed", state="normal")
+                is_reloading = False
+                
+    threading.Thread(target=thread, daemon=True).start()
 def python_file_reload():
-    r1=r'\S+/'
+    r1 = r'\S+/'
+    stop_event = threading.Event()
+    
     def thread():
-        ver1=version_combobox.get()
-        if ver1!="":
-            url=f"https://www.python.org/ftp/python/{ver1}"
-        else:
-            return
-        with requests.get(url,verify=False) as r:
-            bs = BeautifulSoup(r.content, "lxml")
-            results = []
-            for i in bs.find_all("a"):
-                if (re.match(r1,i.text)==None) and (i.text[-1]!="/") and(".exe" not in i.text) and("-embed-"not in i.text):
-                    results.append(i.text)
-        ver2=version_combobox.get()
-        if ver1==ver2:
-            choose_file_combobox.configure(values=results)
-        else:
-            choose_file_combobox.configure(values=[])
-    while True:
-        threading.Thread(target=thread).start()
-        time.sleep(0.3)
+        session = requests.Session()
+        session.verify = False
+        session.headers.update({
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        })
+        
+        while not stop_event.is_set():
+            ver1 = version_combobox.get()
+            if not ver1:
+                time.sleep(0.3)
+                continue
+                
+            url = f"https://www.python.org/ftp/python/{ver1}"
+            max_retries = 3
+            retry_delay = 1
+            
+            for attempt in range(max_retries):
+                try:
+                    response = session.get(url, timeout=10)
+                    response.raise_for_status()
+                    
+                    bs = BeautifulSoup(response.content, "lxml")
+                    results = []
+                    for i in bs.find_all("a"):
+                        if (re.match(r1, i.text) is None and 
+                            i.text[-1] != "/" and 
+                            ".exe" not in i.text and 
+                            "-embed-" not in i.text):
+                            results.append(i.text)
+                    
+                    ver2 = version_combobox.get()
+                    if ver1 == ver2:
+                        choose_file_combobox.configure(values=results)
+                    else:
+                        choose_file_combobox.configure(values=[])
+                    break
+                    
+                except requests.exceptions.SSLError as e:
+                    logging.error(f"SSL Error (attempt {attempt + 1}/{max_retries}): {e}")
+                except requests.exceptions.RequestException as e:
+                    logging.error(f"Request Error (attempt {attempt + 1}/{max_retries}): {e}")
+                except Exception as e:
+                    logging.error(f"Unexpected Error (attempt {attempt + 1}/{max_retries}): {e}")
+                
+                if attempt < max_retries - 1:
+                    time.sleep(retry_delay)
+                    retry_delay *= 2
+            
+            time.sleep(0.3)
+    
+    thread = threading.Thread(target=thread, daemon=True)
+    thread.start()
+    return stop_event  # 返回停止事件，以便在需要时停止线程
 def read_python_list():
-    base1=str(sav_path.read_path(config_path,"python_version_list.txt","readline"))
+    base1=str(sav_path.read_path(config_path,"version.txt","readline"))
     base2=base1.strip("[]").split(",")
     base3=[]
     for i in base2:
@@ -198,302 +300,215 @@ def load_proxy_config():
         pass
     return None
 
-def download_file(selected_version, destination_path, num_threads):
-    """下载指定版本的Python安装程序"""
-    global file_size, executor, futures, downloaded_bytes, is_downloading, destination, url,lock
-    
-    # 加载代理配置
-    proxy_config = load_proxy_config()
-    proxies = None
-    if proxy_config and proxy_config.get('enabled'):
-        proxy_addr = proxy_config.get('proxy')
-        proxy_port = proxy_config.get('port')
-        if proxy_addr and proxy_port:
-            if proxy_config.get('use_auth'):
-                username = proxy_config.get('username')
-                password = proxy_config.get('password')
-                if username and password:
-                    proxies = {
-                        "http": f"http://{username}:{password}@{proxy_addr}:{proxy_port}",
-                        "https": f"http://{username}:{password}@{proxy_addr}:{proxy_port}"
-                    }
-            else:
-                proxies = {
-                    "http": f"http://{proxy_addr}:{proxy_port}",
-                    "https": f"https://{proxy_addr}:{proxy_port}"
-                }
-    
-    # 计算每个线程下载的数据块大小
-    chunk_size = file_size // num_threads
-    lock = threading.Lock()
-    futures = []
-    downloaded_bytes = [0]
-    is_downloading = True
-    # 设置进度条为不定式模式
-    download_pb.config(mode="indeterminate")
-    download_pb.start()
-    # 验证目标路径是否有效
-    if not validate_path(destination_path):
-        status_label.config(text="Invalid destination path")
-        download_pb.stop()
-        download_pb.config(mode="determinate")
-        download_pb['value'] = 0
-        enable_download()
+def init_download_manager():
+    """初始化下载管理器"""
+    global download_manager
+    if download_manager is None:
+        # 优化线程数配置
+        thread_count = min(max(2, int(threads_entry.get())), os.cpu_count() * 2)
+        download_manager = DownloadManager(
+            task_db_path=os.path.join(config_path, "downloads.json"),
+            max_concurrent_downloads=min(3, os.cpu_count()),
+            num_threads_per_download=thread_count,
+            on_task_status_changed=on_download_status_changed
+        )
+        logger.info(f"Download manager initialized with {thread_count} threads per download")
 
+def on_download_status_changed(task_id, status):
+    """下载状态变化回调函数"""
+    if task_id == current_task_id:
+        update_download_ui()
 
-    # 构造文件名和目标路径
-    file_name = choose_file_combobox.get()
-    destination = os.path.join(destination_path, file_name)
+def update_download_ui():
+    """更新下载UI"""
+    if not current_task_id:
+        return
 
-    url = f"https://www.python.org/ftp/python/{selected_version}/{file_name}"
-
-    # 获取文件大小
+    # 使用UI更新队列来处理界面更新
     try:
-        # 获取代理设置
-        proxy_settings = None
-        if proxy.proxy_check_status(1965):
-            result = proxy.read_proxy(1965)
-            username = result['username'] if proxy.password_check_status(1965) else None
-            password = result['password'] if proxy.password_check_status(1965) else None
-            proxy_settings = proxy.proxy_address(result['address'], result['port'], username, password, result['key'].encode())
+        task = download_manager.get_task(current_task_id)
+        if not task:
+            return
 
-        response = requests.head(url, timeout=10, verify=False, proxies=proxy_settings)
-        response.raise_for_status()
-        file_size = int(response.headers['Content-Length'])
-    except requests.RequestException as e:
-        status_label.config(text=f"Failed to get file size: {str(e)}")
-        download_pb.stop()
-        download_pb.config(mode="determinate")
-        download_pb['value'] = 0
-        enable_download()
+        UI_UPDATE_QUEUE.put({
+            'task': task,
+            'status': task.status,
+            'progress': task.progress,
+            'speed': task.speed,
+            'total_size': task.total_size,
+            'downloaded_size': task.downloaded_size,
+            'error': task.error if hasattr(task, 'error') else None
+        })
+        
+        # 使用after方法在主线程中处理UI更新
+        root.after(1, process_ui_updates)
+    except Exception as e:
+        logger.error(f"Error updating UI: {str(e)}")
 
-
-    # 创建目标文件并预分配空间
+def process_ui_updates():
+    """处理UI更新队列"""
     try:
-        with open(destination, 'wb') as f:
-            f.truncate(file_size)
-    except IOError as e:
-        status_label.config(text=f"Failed to create file: {str(e)}")
-        download_pb.stop()
-        download_pb.config(mode="determinate")
-        download_pb['value'] = 0
-        enable_download()
-
-
-
-
-    # 使用线程池执行下载任务
-    with ThreadPoolExecutor(max_workers=num_threads) as executor:
-        for i in range(num_threads):
-            if not is_downloading:
-                break
-            start_byte = i * chunk_size
-            end_byte = start_byte + chunk_size - 1 if i != num_threads - 1 else file_size - 1
-            futures.append(executor.submit(download_chunk, url, start_byte, end_byte, destination))
-
-        # 显示并启用取消下载按钮
-        cancel_download_button.grid(row=5, column=0, columnspan=3, pady=20, padx=20)
-        cancel_download_button.config(state="normal")
-        
-        # 设置进度条为定式模式
-        download_pb.config(mode="determinate")
-        download_pb.stop()
-        download_pb['value'] = 0
-        download_pb['maximum'] = 100
-        
-        # 启动一个线程来更新下载进度
-        threading.Thread(target=update_progress, daemon=True).start()
-
-def download_chunk(url, start_byte, end_byte, destination, retries=5):
-    """下载文件的指定部分"""
-    global is_downloading
-    headers = {'Range': f'bytes={start_byte}-{end_byte}'}
-    
-    # 加载代理配置
-    proxy_config = load_proxy_config()
-    proxies = None
-    if proxy_config and proxy_config.get('enabled'):
-        proxy_addr = proxy_config.get('proxy')
-        proxy_port = proxy_config.get('port')
-        if proxy_addr and proxy_port:
-            if proxy_config.get('use_auth'):
-                username = proxy_config.get('username')
-                password = proxy_config.get('password')
-                if username and password:
-                    proxies = {
-                        "http": f"http://{username}:{password}@{proxy_addr}:{proxy_port}",
-                        "https": f"http://{username}:{password}@{proxy_addr}:{proxy_port}"
-                    }
-            else:
-                proxies = {
-                    "http": f"http://{proxy_addr}:{proxy_port}",
-                    "https": f"https://{proxy_addr}:{proxy_port}"
-                }
-    
-    for attempt in range(retries):
-        if not is_downloading:
-            return False
-        try:
-            # 发起请求
-            with requests.get(url, headers=headers, stream=True, verify=False, proxies=proxies) as response:
-                response.raise_for_status()
-                # 写入文件
-                with lock:
-                    with open(destination, 'r+b') as f:
-                        f.seek(start_byte)
-                        for chunk in response.iter_content(chunk_size=8192):
-                            if not is_downloading:
-                                return False
-                            f.write(chunk)
-                            with lock:
-                                downloaded_bytes[0] += len(chunk)
-            return True
+        while not UI_UPDATE_QUEUE.empty():
+            update = UI_UPDATE_QUEUE.get_nowait()
+            task = update['task']
+            
+            # 更新进度条
+            if update['status'] == 'downloading':
+                download_pb['value'] = update['progress']
+                speed_kb = update['speed'] / 1024
+                speed_text = f"{speed_kb:.2f} KB/s" if speed_kb < 1024 else f"{speed_kb / 1024:.2f} MB/s"
                 
-        except Exception as e:
-            if attempt < retries - 1:
-                time.sleep(1)
-                continue
-            with lock:
-                status_label.config(text=f"Download Failed!")
-                is_downloading = False
-                download_pb.stop()
-                download_pb.config(mode="determinate")
+                remaining_mb = (update['total_size'] - update['downloaded_size']) / (1024 * 1024)
+                eta = task.get_eta() if hasattr(task, 'get_eta') else 0
+                eta_text = f"ETA: {eta:.0f}s" if eta else ""
+                
+                status_text = f"Downloading: {update['progress']:.1f}% ({speed_text}) - {remaining_mb:.1f}MB remaining {eta_text}"
+                status_label.config(text=status_text)
+                
+                update_button_states(True, False, True)
+                
+            elif update['status'] == 'paused':
+                status_label.config(text="Download paused")
+                update_button_states(False, True, True)
+                
+            elif update['status'] == 'completed':
+                download_pb['value'] = 100
+                status_label.config(text="Download completed successfully")
+                update_button_states(True, False, False)
+                
+            elif update['status'] in ['cancelled', 'error']:
                 download_pb['value'] = 0
-            return False
+                error_text = f"Download failed: {update['error']}" if update['status'] == 'error' else "Download cancelled by user"
+                status_label.config(text=error_text)
+                update_button_states(True, False, False)
+                
+    except Exception as e:
+        logger.error(f"Error processing UI updates: {str(e)}")
+    finally:
+        # 继续处理队列中的更新
+        if not UI_UPDATE_QUEUE.empty():
+            root.after(1, process_ui_updates)
 
-def update_progress():
-    """更新进度条和状态标签"""
-    global file_size, is_downloading
+def update_button_states(can_download: bool, can_resume: bool, can_cancel: bool):
+    """更新按钮状态"""
+    download_button.config(state="normal" if can_download else "disabled")
+    resume_button.config(state="normal" if can_resume else "disabled")
+    pause_button.config(state="normal" if not can_resume and can_cancel else "disabled")
+    cancel_download_button.config(state="normal" if can_cancel else "disabled")
+
+def update_task_progress():
+    """定期更新下载任务进度"""
+    try:
+        if download_manager and current_task_id:
+            task = download_manager.get_task(current_task_id)
+            if task and task.status == 'downloading':
+                update_download_ui()
+                
+        # 动态调整刷新间隔
+        progress = download_pb['value']
+        refresh_interval = min(
+            2000 if progress > 95 else  # 接近完成时大幅降低刷新频率
+            1000 if progress > 80 else  # 高进度时降低刷新频率
+            500,                        # 正常刷新频率
+        )
+        root.after(refresh_interval, update_task_progress)
+    except Exception as e:
+        logger.error(f"Error in task progress update: {str(e)}")
+        root.after(1000, update_task_progress)  # 发生错误时使用较长的刷新间隔
+
+def validate_download_config():
+    """验证下载配置是否有效"""
+    selected_version = version_combobox.get()
+    destination_path = destination_entry.get()
+    file_name = choose_file_combobox.get()
+    thread_count = threads_entry.get()
     
-    start_time = time.time()  # 记录下载开始时间
-    last_bytes = 0  # 记录上一次的下载字节数
-    
-    while any(not future.done() for future in futures):
-        if not is_downloading:
-            break
-        with lock:
-            current_bytes = downloaded_bytes[0]
-        cancel_download_button.grid(row=5, column=0, columnspan=3, pady=20, padx=20)
-        progress = float(current_bytes / file_size * 100) if file_size != 0 else 0  # 保留3位小数
-        download_pb['value'] = progress
-        download_pb.update()  # 确保进度条及时更新
-        # 计算下载速度
-        elapsed = time.time() - start_time
-        speed = (current_bytes - last_bytes) / elapsed if elapsed > 0 else 0
-
-        # 更新速度显示
-        speed_kb = speed / 1024
-        speed_text = f"{speed_kb:.2f} KB/s" if speed_kb < 1024 else f"{speed_kb / 1024:.2f} MB/s"
-
-        status_label.config(text=f"Downloading: {progress:.3f}% ({speed_text})")
-
-        last_bytes = current_bytes
-        start_time = time.time()  # 重置计时器
-        time.sleep(0.2)  # 降低更新频率避免闪烁
-        
-    if is_downloading:
-        download_pb['value'] = 100
-        status_label.config(text="Download Complete!")
-        enable_download()
-    else:
-        download_pb['value'] = 0
-        status_label.config(text="Download Cancelled!")
-        enable_download()
-        
-    is_downloading = False
-    cancel_download_button.grid_forget()
-
-def cancel_download():
-    global executor,is_downloading
-    if is_downloading:
-        cancel_event.set()
-        executor.shutdown(wait=False)
-        is_downloading = False
-        status_label.config(text="Cancelling download...")
-        download_pb['value'] = 0  # 重置进度条
-        cancel_download_button.grid_forget()  # 立即隐藏取消按钮
-        
-        destination_path = destination_entry.get()
-        filename=choose_file_combobox.get()
-        file_name = filename
-        destination = os.path.join(destination_path, file_name)
-        
-        if os.path.exists(destination):
-            os.remove(destination)
-            status_label.config(text="Download cancelled and incomplete file removed.")
-            enable_download()
-        else:
-            status_label.config(text="Download cancelled.")
-            enable_download()
-    root.after(3000, clear_a)
-
-def disable_download():
-    version_combobox.config(state="disabled")
-    choose_file_combobox.config(state="disabled")
-    destination_entry.config(state="disabled")
-    threads_entry.config(state="disabled")
-    version_reload.config(state="disabled")
-    select_button.config(state="disabled")
+    # 初始化时默认禁用下载按钮
     download_button.config(state="disabled")
     
-def enable_download():
-    global is_reloading
-    version_combobox.config(state="readonly")
-    choose_file_combobox.config(state="readonly")
-    destination_entry.config(state="normal")
-    threads_entry.config(state="readonly")
+    # 收集所有错误信息
+    errors = []
+    
+    # 验证版本选择
+    if not selected_version:
+        errors.append("请选择Python版本！")
+    
+    # 验证目标路径
+    if not destination_path or not os.path.exists(destination_path):
+        errors.append("路径无效！")
+    
+    # 验证文件选择
+    if not file_name:
+        errors.append("请选择要下载的文件！")
+    
+    # 验证线程数
+    try:
+        thread_count = int(thread_count)
+        if thread_count < 1:
+            raise ValueError
+    except (ValueError, TypeError):
+        errors.append("无效的线程数！")
+    
+    # 如果有错误，显示所有错误信息
+    if errors:
+        status_label.config(text="\n".join(errors), style="Error.TLabel", foreground="red")
+        return False
+    
+    # 所有验证通过才启用下载按钮
     download_button.config(state="normal")
-    try:
-        if is_reloading:
-            version_reload.config(state="disabled")
-        else:
-            version_reload.config(state="normal")
-    except:
-        version_reload.config(state="normal")
-    select_button.config(state="normal")
-    cancel_download_button.grid_forget()
-
-def sort_results(results: list):
-    global is_downloading
-    _results = results.copy()
-    length = len(_results)
-    for i in range(length):
-        for ii in range(0, length - i - 1):
-            v1 = Version(_results[ii])
-            v2 = Version(_results[ii + 1])
-            if v1 < v2:
-                _results[ii], _results[ii + 1] = _results[ii + 1], _results[ii]
-    version_combobox.configure(values=_results)
-    sav_path.save_path(config_path,"python_version_list.txt","w",_results)
-    try:
-        if is_downloading:
-            version_reload.config(text="Reload",state="disabled")
-        else:
-            version_reload.config(text="Reload",state="normal")
-    except:
-        version_reload.config(text="Reload",state="normal")
+    return True
 
 def download_selected_version():
     """开始下载选定的Python版本"""
+    global current_task_id
+    
+    # 验证下载配置
+    if not validate_download_config():
+        return
+    
     selected_version = version_combobox.get()
     destination_path = destination_entry.get()
-    num_threads = int(threads_entry.get())
+    file_name = choose_file_combobox.get()
+    
+    # 初始化下载管理器
+    init_download_manager()
+    
+    # 构建下载URL和文件保存路径
+    url = f"https://www.python.org/ftp/python/{selected_version}/{file_name}"
+    save_path = os.path.join(destination_path, file_name)
+    
+    from downloader import download_manager
+    # 创建下载任务
+    current_task_id = download_manager.add_task(
+        url=url,
+        file_path=destination_path,
+        thread_count=4,
+        proxies=None
+    )
+    
+    # 更新UI
+    update_download_ui()
 
-    if not os.path.exists(destination_path):
-        status_label.config(text="Invalid path!")
-        root.after(5000, clear_a)
-        return
-    if choose_file_combobox.get()==None or choose_file_combobox.get()=="":
-        status_label.config(text="Please choose a file!")
-        root.after(5000,clear_a)
-        return
-    disable_download()
-    cancel_download_button.config(state="normal")
-    cancel_download_button.grid(row=5, column=0, columnspan=3, pady=20, padx=20)  # 确保取消按钮可见
+def cancel_download():
+    """取消下载"""
+    global current_task_id
+    if current_task_id:
+        download_manager.cancel_task(current_task_id)
+        update_download_ui()
 
-    clear_a()
-    root.protocol("WM_DELETE_WINDOW", on_closing)
-    threading.Thread(target=download_file, args=(selected_version, destination_path, num_threads), daemon=True).start()
+def resume_download():
+    """恢复下载"""
+    global current_task_id
+    if current_task_id:
+        download_manager.resume_task(current_task_id)
+        update_download_ui()
+
+def pause_download():
+    """暂停下载"""
+    global current_task_id
+    if current_task_id:
+        download_manager.pause_task(current_task_id)
+        update_download_ui()
 
 def show_about():
     time_lim=(datetime.datetime(2025,5,2)-datetime.datetime.now()).days
@@ -521,13 +536,15 @@ def on_closing():
 
 
 
+
+
 #GUI
 if __name__ == "__main__" and block_features.block_start():
     #启动laugh = True
-    if(datetime.datetime.now()>=datetime.datetime(2025,5,2)):
+    if(datetime.datetime.now()>=datetime.datetime(2025,9,2)):
         messagebox.showerror("Error","You can not open python_tool:exitcode(0x1)")
         exit(1)
-    elif(datetime.datetime.now()>=datetime.datetime(2025,4,1)):
+    elif(datetime.datetime.now()>=datetime.datetime(2025,8,1)):
         messagebox.showwarning("up","Will cannot open on 2025,5.2")
     
     root = tk.Tk()
@@ -554,67 +571,96 @@ if __name__ == "__main__" and block_features.block_start():
     tab_control.add(fsettings,text="Pip")
     tab_control.grid(row=0, padx=10, pady=10)
 
-    framea_tab = ttk.Frame(fmode)
-    framea_tab.pack(padx=20, pady=20)
+    # 创建主下载界面框架
+    main_frame = ttk.Frame(fmode)
+    main_frame.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
 
     settings_tab=ttk.Frame(fsettings)
-    settings_tab.pack(padx=20, pady=20)
+    settings_tab.grid(row=1, column=0, padx=20, pady=20, sticky="nsew")
 
+    # 版本选择模块
+    version_frame = ttk.LabelFrame(main_frame, text="Version Selection", padding=10)
+    version_frame.grid(row=0, column=0, padx=5, pady=5, sticky="ew")
 
-    #PYTHON VERSION
-    version_label = ttk.Label(framea_tab, text="Select Python Version:")
-    version_label.grid(row=0, column=0, pady=20, padx=20)
-
+    version_label = ttk.Label(version_frame, text="Python Version:")
+    version_label.grid(row=0, column=0, pady=5, padx=5)
 
     selected_version = tk.StringVar()
-    version_combobox = ttk.Combobox(framea_tab, textvariable=selected_version, values=[], state="read")
-    version_combobox.grid(row=0, column=1, pady=20, padx=20)
-    version_reload=ttk.Button(framea_tab,text="Reload",command=python_version_reload)
-    version_reload.grid(row=0,column=2, pady=20, padx=20)
+    version_combobox = ttk.Combobox(version_frame, textvariable=selected_version, values=[], state="read", width=30)
+    version_combobox.grid(row=0, column=1, pady=5, padx=5)
 
+    version_reload = ttk.Button(version_frame, text="Reload Versions", command=python_version_reload)
+    version_reload.grid(row=0, column=2, pady=5, padx=5)
 
-    
-    
+    # 文件选择模块
+    file_frame = ttk.LabelFrame(main_frame, text="File Selection", padding=10)
+    file_frame.grid(row=1, column=0, padx=5, pady=5, sticky="ew")
 
-    destination_label = ttk.Label(framea_tab, text="Select Destination:")
-    destination_label.grid(row=1, column=0, pady=20, padx=20)
+    choose_label = ttk.Label(file_frame, text="Python Package:")
+    choose_label.grid(row=0, column=0, pady=5, padx=5)
 
-    destination_entry = ttk.Entry(framea_tab, width=50)
-    destination_entry.grid(row=1, column=1, pady=20, padx=20)
+    choose_file = tk.StringVar()
+    choose_file_combobox = ttk.Combobox(file_frame, textvariable=choose_file, values=[], state="readonly", width=50)
+    choose_file_combobox.grid(row=0, column=1, columnspan=2, pady=5, padx=5)
 
-    select_button = ttk.Button(framea_tab, text="Select", command=select_destination)
-    select_button.grid(row=1, column=2, pady=20, padx=20)
+    # 下载设置模块
+    settings_frame = ttk.LabelFrame(main_frame, text="Download Settings", padding=10)
+    settings_frame.grid(row=2, column=0, padx=5, pady=5, sticky="ew")
 
-    threads_label = ttk.Label(framea_tab, text="Number of Threads:")
-    threads_label.grid(row=2, column=0, pady=20, padx=20)
+    destination_label = ttk.Label(settings_frame, text="Save Location:")
+    destination_label.grid(row=0, column=0, pady=5, padx=5)
+
+    destination_entry = ttk.Entry(settings_frame, width=50)
+    destination_entry.grid(row=0, column=1, pady=5, padx=5)
+
+    select_button = ttk.Button(settings_frame, text="Browse", command=select_destination)
+    select_button.grid(row=0, column=2, pady=5, padx=5)
+
+    threads_label = ttk.Label(settings_frame, text="Threads:")
+    threads_label.grid(row=1, column=0, pady=5, padx=5)
 
     threads = tk.IntVar()
-    threads_entry = ttk.Combobox(framea_tab, width=10,textvariable=threads,values=[str(i) for i in range(1, 129)],state="readonly")
-    threads_entry.grid(row=2, column=1, pady=20, padx=20)
+    threads_entry = ttk.Combobox(settings_frame, width=10, textvariable=threads, values=[str(i) for i in range(1, 129)], state="readonly")
+    threads_entry.grid(row=1, column=1, sticky="w", pady=5, padx=5)
     threads_entry.current(7)
 
-    choose_label=ttk.Label(framea_tab,text="Choose a File:")
-    choose_label.grid(row=3,column=0, pady=20, padx=20)
-    choose_file=tk.StringVar()
-    choose_file_combobox=ttk.Combobox(framea_tab,textvariable=choose_file,values=[],state="readonly",width=50)
-    choose_file_combobox.grid(row=3,column=1,columnspan=3, pady=20, padx=20)
-    #DOWNLOAD
-    download_button = ttk.Button(framea_tab, text="Download Selected Version", command=download_selected_version)
-    download_button.grid(row=4, column=0, columnspan=5, pady=20, padx=20)
+    # 下载控制模块
+    control_frame = ttk.LabelFrame(main_frame, text="Download Control", padding=10)
+    control_frame.grid(row=3, column=0, padx=5, pady=5, sticky="ew")
 
-    cancel_download_button = ttk.Button(framea_tab, text="Cancel Download", command=cancel_download, state="disabled")
-    cancel_download_button.grid_forget()
+    button_frame = ttk.Frame(control_frame)
+    button_frame.grid(row=0, column=0, sticky="w")
 
-    
-    download_pb=ttk.Progressbar(framea_tab,length=800)
-    download_pb.grid(row=6,column=0,pady=80,columnspan=3, padx=20)
-    
-    status_label = ttk.Label(framea_tab, text="", padding="10")
-    status_label.grid(row=7, column=0, columnspan=3, pady=20, padx=20)
+    download_button = ttk.Button(button_frame, text="Download", command=download_selected_version)
+    download_button.grid(row=0, column=0, padx=5)
 
-    #PIP(UPDRADE)
-    pip_upgrade_button = ttk.Button(settings_tab, text="Upgrade pip", command=pip_manager.upgrade_pip)
+    pause_button = ttk.Button(button_frame, text="Pause", command=pause_download, state="disabled")
+    pause_button.grid(row=0, column=1, padx=5)
+
+    resume_button = ttk.Button(button_frame, text="Resume", command=resume_download, state="disabled")
+    resume_button.grid(row=0, column=2, padx=5)
+
+    cancel_download_button = ttk.Button(button_frame, text="Cancel", command=cancel_download)
+    cancel_download_button.grid(row=0, column=3, padx=5)
+
+    # 进度显示模块
+    progress_frame = ttk.LabelFrame(main_frame, text="Download Progress", padding=10)
+    progress_frame.grid(row=4, column=0, sticky="ew", padx=5, pady=5)
+
+    download_pb = ttk.Progressbar(progress_frame, orient="horizontal", mode="determinate", length=280)
+    download_pb.grid(row=0, column=0, columnspan=3, padx=5, pady=5)
+
+    status_label = ttk.Label(progress_frame, text="", padding=5)
+    status_label.grid(row=1, column=0, sticky="ew", padx=5, pady=5)
+
+    main_frame.grid_rowconfigure(0, weight=1)
+    main_frame.grid_columnconfigure(0, weight=1)
+
+    pip_upgrade_button = ttk.Button(settings_tab, text="Upgrade Pip", command=pip_manager.upgrade_pip)
     pip_upgrade_button.grid(row=0, column=0, columnspan=3, pady=20, padx=20)
+    
+    progress_frame.grid_columnconfigure(0, weight=1)
+    settings_tab.grid_rowconfigure(0, weight=1)
 
     package_label = ttk.Label(settings_tab, text="Enter Package Name:")
     package_label.grid(row=1, column=0, pady=20, padx=20)
@@ -637,13 +683,35 @@ if __name__ == "__main__" and block_features.block_start():
     # 初始化pip_manager和settings_manager
     pip_manager.init_ui_references(root, package_label, install_button, pip_upgrade_button, uninstall_button, package_entry)
     settings_manager.init_settings_manager(root, config_path)
+    
+    # 启动更新任务进度的定时器
+    root.after(500, update_task_progress)
 
     # Set sv_ttk theme
     threading.Thread(target=python_file_reload, daemon=True).start()
     check_python_installation()
     threading.Thread(target=read_python_list, daemon=True).start()
     root.resizable(False,False)
-    settings_manager.load_theme()  # 使用settings_manager中的函数
+    settings_manager.load_theme() 
+    status_label = ttk.Label(
+        control_frame,
+        text="请完成所有配置项",
+        style="Error.TLabel"
+    )
+    status_label.grid(row=5, column=0, columnspan=3, pady=5)
+
+    # 初始化下载按钮状态
+    download_button.config(state="disabled")
+    status_label.config(text="请完成所有配置项", style="Error.TLabel")
+    
+    # 在界面元素初始化后调用验证
+    def validate_download_config_threadind():
+        while True:
+            a=threading.Thread(target=validate_download_config,daemon=True)
+            a.start()
+            a.join()
+            
+    threading.Thread(target=validate_download_config_threadind,daemon=True).start()   
     root.mainloop()
     #root.after(3000,)
 if block_features.block_start()==False:

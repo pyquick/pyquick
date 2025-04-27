@@ -133,7 +133,7 @@ def open_settings():
         text="Pyquick - Python Package Manager\nVersion: 1.0.0\nAuthor: Pyquick Team",
         justify=tk.CENTER
     )
-    about_label.pack(padx=20, pady=20)
+    about_label.grid(row=0, column=0, padx=20, pady=20)
 
 def switch_theme(switch_var):
     """切换主题"""
@@ -158,7 +158,9 @@ def create_proxy_tab(parent_frame):
     STATUS_ROW = 7
     
     proxy_tab = ttk.Frame(parent_frame)
-    proxy_tab.pack(fill=tk.BOTH, expand=True)
+    proxy_tab.grid(row=0, column=0, sticky='nsew')
+    parent_frame.grid_rowconfigure(0, weight=1)
+    parent_frame.grid_columnconfigure(0, weight=1)
     
     # 代理开关
     enabled = tk.BooleanVar()
@@ -225,21 +227,21 @@ def create_proxy_tab(parent_frame):
         text="Test Connection", 
         command=lambda: test_proxy_connection(proxy_entry, port_entry, user, username_entry, password_entry, status_label)
     )
-    test_button.pack(side=tk.LEFT, padx=10)
+    test_button.grid(row=0, column=0, padx=10)
     
     save_button = ttk.Button(
         button_frame, 
         text="Save Settings", 
         command=lambda: save_proxy_settings(proxy_entry, port_entry, user, username_entry, password_entry, enabled, status_label)
     )
-    save_button.pack(side=tk.LEFT, padx=10)
+    save_button.grid(row=0, column=1, padx=10)
     
     # 状态标签 - 放在按钮下方并确保其可见性
     status_frame = ttk.Frame(proxy_tab)
     status_frame.grid(row=STATUS_ROW, column=0, columnspan=2, padx=20, pady=5, sticky="ew")
     
     status_label = ttk.Label(status_frame, text="", foreground="red", font=("", 10, ""))
-    status_label.pack(fill=tk.X, expand=True, pady=5)
+    status_label.grid(row=1, column=0, columnspan=2, sticky='ew', pady=5)
     
     # 构建UI元素字典
     ui_elements = {
@@ -292,7 +294,7 @@ def toggle_auth_fields(user, enabled, ui_elements):
     """切换认证字段显示"""
     # 在单独线程中执行以避免UI阻塞
     def toggle_thread():
-        # 设置密码认证状态
+    # 设置密码认证状态
         if enabled.get():
             proxy.password_set_status(user.get(), 1965)
             
@@ -319,16 +321,16 @@ def update_auth_ui(use_auth, ui_elements):
             password_label.grid(row=5, column=0, padx=20, pady=10, sticky="w")
         if password_entry:
             password_entry.grid(row=5, column=1, padx=20, pady=10, sticky="w")
-    else:
+        else:
         # 隐藏认证字段
-        if username_label:
-            username_label.grid_forget()
-        if username_entry:
-            username_entry.grid_forget()
-        if password_label:
-            password_label.grid_forget()
-        if password_entry:
-            password_entry.grid_forget()
+            if username_label:
+                username_label.grid_forget()
+            if username_entry:
+                username_entry.grid_forget()
+            if password_label:
+                password_label.grid_forget()
+            if password_entry:
+                password_entry.grid_forget()
 
 def update_proxy_ui(enabled, ui_elements):
     """更新代理UI状态"""
@@ -451,16 +453,16 @@ def load_proxy_settings(ui_elements):
             # 设置状态
             enabled.set(proxy_status)
             user.set(auth_status)
-            
-            # 填充内容
-            if result["address"]:
-                proxy_entry.insert(0, result["address"])
-            if result["port"]:
-                port_entry.insert(0, result["port"])
-            if result["username"]:
-                username_entry.insert(0, result["username"])
-            if result["password"]:
-                password_entry.insert(0, result["password"])
+        
+        # 填充内容
+        if result["address"]:
+            proxy_entry.insert(0, result["address"])
+        if result["port"]:
+            port_entry.insert(0, result["port"])
+        if result["username"]:
+            username_entry.insert(0, result["username"])
+        if result["password"]:
+            password_entry.insert(0, result["password"])
             
             # 根据代理状态决定是否显示认证开关
             if proxy_status:
@@ -493,34 +495,34 @@ def save_proxy_settings(proxy_entry, port_entry, user, username_entry, password_
             
             # 设置认证状态
             proxy.password_set_status(user.get(), 1965)
-            
+                
             # 确保用户名和密码不为None
             username = username_entry.get() if user.get() and username_entry.get() else ""
             password = password_entry.get() if user.get() and password_entry.get() else ""
             
             # 保存代理设置到proxy模块
             proxy.save_proxy(
-                proxy_entry.get() or "",
-                port_entry.get() or "",
-                username,
-                password,
+                    proxy_entry.get() or "",
+                    port_entry.get() or "",
+                    username,
+                    password,
                 1965
             )
             
             # 同时保存完整配置到proxy.json
             proxy_config = {
                 'enabled': enabled.get(),
-                'proxy': proxy_entry.get() or "",
-                'port': port_entry.get() or "",
+                    'proxy': proxy_entry.get() or "",
+                    'port': port_entry.get() or "",
                 'use_auth': user.get(),
-                'username': username,
-                'password': password
+                    'username': username,
+                    'password': password
             }
             sav_path.save_path(config_path, "proxy.json", "w", json.dumps(proxy_config))
             
             # 更新状态标签
             update_status_label("Proxy settings saved", "green", 3.0)
-            
+        
             # 显示消息框
             root.after(0, lambda: messagebox.showinfo("Save Success", "Proxy settings saved successfully"))
             return True
@@ -559,12 +561,12 @@ def test_proxy_connection(proxy_entry, port_entry, user, username_entry, passwor
             # 清空现有状态
             root.after(0, lambda: status_label.config(text=""))
             root.after(0, lambda: status_label.update_idletasks())
-            
+        
             # 检查必填字段
             if not proxy_entry.get() or not port_entry.get():
                 update_status("Please fill in proxy server and port information", "red")
                 return False
-            
+        
             # 构建代理URL
             proxy_url = f"http://{proxy_entry.get()}:{port_entry.get()}"
             proxies = {
@@ -635,4 +637,4 @@ def test_proxy_connection(proxy_entry, port_entry, user, username_entry, passwor
     # 启动测试线程
     threading.Thread(target=test_thread, daemon=True).start()
     
-    return True  # 返回测试启动成功 
+    return True  # 返回测试启动成功
