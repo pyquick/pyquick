@@ -1,5 +1,6 @@
 import tkinter as tk
-from tkinter import ttk, filedialog,messagebox
+from tkinter import ttk, filedialog, messagebox
+package_entry = None
 import subprocess
 import os
 import threading
@@ -18,9 +19,29 @@ import logging
 import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from bs4 import BeautifulSoup
+import sys
+import importlib
+import pip_manager  # 导入pip管理模块
+import settings.settings_manager as settings_manager  # 导入设置管理模块
 config_path=create_folder.get_path("pyquick","1965")
 cancel_event = threading.Event()
 create_folder.folder_create("pyquick","1965")
+
+def install_package(package):
+    try:
+        importlib.import_module(package)
+    except ImportError:
+        try:
+            subprocess.check_call([sys.executable, "-m", "pip", "install", package])
+        except subprocess.CalledProcessError:
+            logging.error(f"Failed to install {package}")
+            return False
+    return True
+
+# 自动安装依赖
+install_package("memory_profiler")
+from debug_info.ui import DebugInfoWindow
+
 def python_version_reload():
     global is_reloading
     def thread():
@@ -166,9 +187,42 @@ def validate_version(version):
         return True
     return bool(re.match(pattern, version))
 
+def load_proxy_config():
+    """加载代理配置"""
+    try:
+        import json
+        proxy_config = sav_path.read_path(config_path, "proxy.json", "read")
+        if proxy_config:
+            return json.loads(proxy_config)
+    except:
+        pass
+    return None
+
 def download_file(selected_version, destination_path, num_threads):
     """下载指定版本的Python安装程序"""
     global file_size, executor, futures, downloaded_bytes, is_downloading, destination, url,lock
+    
+    # 加载代理配置
+    proxy_config = load_proxy_config()
+    proxies = None
+    if proxy_config and proxy_config.get('enabled'):
+        proxy_addr = proxy_config.get('proxy')
+        proxy_port = proxy_config.get('port')
+        if proxy_addr and proxy_port:
+            if proxy_config.get('use_auth'):
+                username = proxy_config.get('username')
+                password = proxy_config.get('password')
+                if username and password:
+                    proxies = {
+                        "http": f"http://{username}:{password}@{proxy_addr}:{proxy_port}",
+                        "https": f"http://{username}:{password}@{proxy_addr}:{proxy_port}"
+                    }
+            else:
+                proxies = {
+                    "http": f"http://{proxy_addr}:{proxy_port}",
+                    "https": f"https://{proxy_addr}:{proxy_port}"
+                }
+    
     # 计算每个线程下载的数据块大小
     chunk_size = file_size // num_threads
     lock = threading.Lock()
@@ -255,21 +309,33 @@ def download_chunk(url, start_byte, end_byte, destination, retries=5):
     global is_downloading
     headers = {'Range': f'bytes={start_byte}-{end_byte}'}
     
+    # 加载代理配置
+    proxy_config = load_proxy_config()
+    proxies = None
+    if proxy_config and proxy_config.get('enabled'):
+        proxy_addr = proxy_config.get('proxy')
+        proxy_port = proxy_config.get('port')
+        if proxy_addr and proxy_port:
+            if proxy_config.get('use_auth'):
+                username = proxy_config.get('username')
+                password = proxy_config.get('password')
+                if username and password:
+                    proxies = {
+                        "http": f"http://{username}:{password}@{proxy_addr}:{proxy_port}",
+                        "https": f"http://{username}:{password}@{proxy_addr}:{proxy_port}"
+                    }
+            else:
+                proxies = {
+                    "http": f"http://{proxy_addr}:{proxy_port}",
+                    "https": f"https://{proxy_addr}:{proxy_port}"
+                }
+    
     for attempt in range(retries):
         if not is_downloading:
             return False
         try:
-            # 获取代理设置
-
-            if proxy.proxy_check_status(1965):
-                result = proxy.read_proxy(1965)
-                username = result['username'] if proxy.password_check_status(1965) else None
-                password = result['password'] if proxy.password_check_status(1965) else None
-                proxy_settings = proxy.proxy_address(result['address'], result['port'], username, password, result['key'].encode())
-            else:
-                proxy_settings = None
             # 发起请求
-            with requests.get(url, headers=headers, stream=True,verify=False, proxies=proxy_settings) as response:
+            with requests.get(url, headers=headers, stream=True, verify=False, proxies=proxies) as response:
                 response.raise_for_status()
                 # 写入文件
                 with lock:
@@ -429,354 +495,18 @@ def download_selected_version():
     root.protocol("WM_DELETE_WINDOW", on_closing)
     threading.Thread(target=download_file, args=(selected_version, destination_path, num_threads), daemon=True).start()
 
-def disabled_pip():
-    install_button.config(state="disabled")
-    pip_upgrade_button.config(state="disabled")
-    uninstall_button.config(state="disabled")
-    package_entry.config(state="disabled")
-def return_pip():
-    install_button.config(state="normal")
-    pip_upgrade_button.config(state="normal")
-    uninstall_button.config(state="normal")
-    package_entry.config(state="normal")
-def get_current_pip_version():
-    try:
-        result = subprocess.check_output(["python3", "-m", "pip", "--version"])
-        version_str = result.decode().strip().split()[1]
-        return version_str
-    except Exception as e:
-        logging.error(f"Error getting pip version: {e}")
-        return "Unknown"
-def get_latest_pip_version():
-    try:
-        response = requests.get("https://pypi.org/pypi/pip/json", verify=False)
-        data = response.json()
-        version_str = data["info"]["version"]
-        return version_str
-    except Exception as e:
-        logging.error(f"Error getting latest pip version: {e}")
-        return "Unknown"
-def upgrade_pip():
-    def upgrade_pip_thread():
-        try:
-            disabled_pip()
-            current_version = get_current_pip_version()
-            latest_version = get_latest_pip_version()
-            if current_version == "Unknown" or latest_version == "Unknown":
-                if current_version == "Unknown":
-                    package_label.config(text="Error getting current pip version.")
-                if latest_version == "Unknown":
-                    package_label.config(text="Error getting latest pip version.")
-            if current_version == latest_version:
-                package_label.config(text=f"Pip is already up-to-date (v{current_version}).")
-            else:
-                package_label.config(text=f"Upgrading pip from v{current_version} to v{latest_version}...")
-                try:
-                    result=subprocess.run(["pip3", "install", "--upgrade", "pip", "--break-system-packages"], text=True,capture_output=True)
-                    if "Successfully installed" in result.stdout:
-                        package_label.config(text=f"Pip has been upgraded to v{latest_version}.")
-
-                except subprocess.CalledProcessError as e:
-                    package_label.config(text=f"Error upgrading pip: {e.output}")
-        except Exception as e:
-            logging.error(f"Error upgrading pip: {e}")
-            package_label.config(text=f"Error upgrading pip: {str(e)}")
-        return_pip()
-        root.after(3000, clear_a)
-    upgrade_thread = threading.Thread(target=upgrade_pip_thread, daemon=True)
-    upgrade_thread.start()
-
-    
-
-        
-#try_update(["python3","-m","pip3", "install", "--upgrade", "pip", "--break-system-packages"])
-
-
-def install_package():
-    def clear_status_label():
-        root.after(3000, clear_a)
-    package_name = package_entry.get()
-    def install_package_thread():
-        disabled_pip()
-        try:
-            installed_packages = subprocess.check_output(["python3", "-m", "pip", "list", "--format=columns"], text=True)
-            if package_name.lower() in installed_packages.lower():
-                package_label.config(text=f"Package '{package_name}' is already installed.")
-            else:
-                result = subprocess.run(["python3", "-m", "pip", "install", package_name], capture_output=True, text=True)
-                if "Successfully installed" in result.stdout:
-                    package_label.config(text=f"Package '{package_name}' has been installed successfully!")
-                else:
-                    package_label.config(text=f"Error installing package '{package_name}': {result.stderr}")
-        except subprocess.CalledProcessError as e:
-            status_label.config(text=f"Error running pip command: {e.output}")
-        except Exception as e:
-            status_label.config(text=f"Error installing package '{package_name}': {str(e)}")
-        return_pip()
-        clear_status_label()
-    install_thread = threading.Thread(target=install_package_thread, daemon=True)
-    install_thread.start()
-def uninstall_package():
-    package_name = package_entry.get()
-    def uninstall_package_thread():
-        disabled_pip()
-        try:
-            installed_packages = subprocess.check_output(["python3", "-m", "pip", "list", "--format=columns"], text=True)
-            if package_name.lower() in installed_packages.lower():
-                result = subprocess.run(["python3", "-m", "pip", "uninstall", "-y", package_name], capture_output=True, text=True)
-                if "Successfully uninstalled" in result.stdout:
-                    package_label.config(text=f"Package '{package_name}' has been uninstalled successfully!")
-                    root.after(3000,clear_a)
-                else:
-                    package_label.config(text=f"Cannot uninstall package '{package_name}': {result.stderr}")
-                    root.after(3000,clear_a)
-            else:
-                package_label.config(text=f"Package '{package_name}' is not installed.")
-                root.after(3000,clear_a)
-        except Exception as e:
-            package_label.config(text=f"Error uninstalling package '{package_name}': {str(e)}")
-            root.after(3000,clear_a)
-        return_pip()
-    uninstall_thread = threading.Thread(target=uninstall_package_thread, daemon=True)
-    uninstall_thread.start()
-
-
-
-
-
 def show_about():
     time_lim=(datetime.datetime(2025,5,2)-datetime.datetime.now()).days
     if (datetime.datetime.now()>=datetime.datetime(2025,4,1)):
         messagebox.showwarning("About", f"Version: dev\nBuild: 1962\n{time_lim} days left.")
     else:
         messagebox.showinfo("About", f"Version: dev\nBuild: 1962\n{time_lim} days left.")
-def load_theme():
-    if block_features.block_theme():
-        try:
-            theme=sav_path.read_path(config_path,"theme.txt","readline")
-            if theme=="light":
-                sv_ttk.set_theme("light")
-            elif theme=="dark":
-                sv_ttk.set_theme("dark")
-            else:
-                sv_ttk.set_theme(darkdetect.theme())
-        except FileNotFoundError:
-            sv_ttk.set_theme(darkdetect.theme())
-        except Exception as e:
-            sv_ttk.set_theme(darkdetect.theme())
-    else:
-        try:
-            sav_path.remove_file(config_path,"theme.txt")
-        except:
-            pass
-def save_theme():
-    if block_features.block_theme():
-        theme=sv_ttk.get_theme()
-        sav_path.save_path(config_path,"theme.txt","w",theme)
-def settings():
-
-    def save_proxy():
-        import proxy
-        def thread():
-            try:
-                proxy.save_proxy(proxy_entry.get(),port_entry.get(),username_entry.get(),password_entry.get(),1965)
-            except Exception as e:
-                pass
-        while True:
-            try:
-                a=threading.Thread(target=thread, daemon=True)
-                a.start()
-                a.join()
-                time.sleep(0.2)
-            except:
-                pass
-    def read_proxy():
-        import proxy
-        def thread():
-            try:
-                result=proxy.read_proxy(1965)
-                if result["address"]!=None:
-                    proxy_entry.insert(0,result["address"])
-                if result["port"]!=None:
-                    port_entry.insert(0,result["port"])
-                if result["username"]!=None and result["username"]!="":
-                    username_entry.insert(0,result["username"])
-                if result["password"]!=None and result["password"]!="":
-                    password_entry.insert(0,result["password"])
-            except Exception as e:
-                print("Error reading proxy: ",str(e))
-        a=threading.Thread(target=thread, daemon=True)
-        a.start()
-        a.join()
-
-    def load_theme():
-        if block_features.block_theme():
-            try:
-                theme=sav_path.read_path(config_path,"theme.txt","readline")
-                if theme=="light":
-                    sv_ttk.set_theme("light")
-                    switch.set(0)
-                elif theme=="dark":
-                    sv_ttk.set_theme("dark")
-                    switch.set(1)
-                else:
-                    sv_ttk.set_theme(darkdetect.theme())
-                    if darkdetect.theme()=="Light":
-                        switch.set(0)
-                    if darkdetect.theme()=="Dark":
-                        switch.set(1)
-            except FileNotFoundError:
-                sv_ttk.set_theme(darkdetect.theme())
-                if darkdetect.theme()=="Light":
-                    switch.set(0)
-                if darkdetect.theme()=="Dark":
-                    switch.set(1)
-            except Exception as e:
-                sv_ttk.set_theme(darkdetect.theme())
-                if darkdetect.theme()=="Light":
-                    switch.set(0)
-                if darkdetect.theme()=="Dark":        
-                    switch.set(1)
-        else:
-            try:
-                sav_path.remove_file(config_path,"theme.txt")
-            except:
-                pass
-    def switch_theme():
-        if block_features.block_theme():
-            if switch.get():
-                sv_ttk.set_theme("dark")
-                sav_path.save_path(config_path,"theme.txt","w","dark")
-            else:
-                sv_ttk.set_theme("light")
-                sav_path.save_path(config_path,"theme.txt","w","light")
-    def enable_k():
-        proxy_label.grid(row=1, column=0, padx=20, pady=20)
-        proxy_entry.grid(row=1, column=1, padx=20, pady=20)
-        port_label.grid(row=2, column=0, padx=20, pady=20)
-        port_entry.grid(row=2, column=1, padx=20, pady=20)
-        checkuser.grid(row=5, column=0, columnspan=2, padx=20, pady=20)
-        if user.get():
-            username_label.grid(row=6, column=0, padx=20, pady=20)
-            username_entry.grid(row=6, column=1, padx=20, pady=20)
-            password_label.grid(row=7, column=0, padx=20, pady=20)
-            password_entry.grid(row=7, column=1, padx=20, pady=20)
-
-    def disable_k():
-        proxy_label.grid_forget()
-        proxy_entry.grid_forget()
-        port_label.grid_forget()
-        port_entry.grid_forget()
-        checkuser.grid_forget()
-        username_label.grid_forget()
-        username_entry.grid_forget()
-        password_label.grid_forget()
-        password_entry.grid_forget()
-    def check_proxy_status():
-        import proxy
-        try:
-            result=proxy.proxy_check_status(1965)
-            if result==True:
-                enabled.set(True)
-                enable_k()
-            else:
-                enabled.set(False)
-                disable_k()
-        except Exception:
-            enabled.set(False)
-            disable_k()
-    def set_proxy_status():
-        import proxy
-        def thread():
-            try:
-                if enabled.get():
-                    proxy.proxy_set_status(True,1965)
-                    enable_k()
-                else:
-                    proxy.proxy_set_status(False,1965)
-                    disable_k()
-            except Exception:
-                pass
-        while True:
-            a=threading.Thread(target=thread, daemon=True)
-            a.start()
-            a.join()
-            time.sleep(0.2)
-    window=tk.Toplevel(root)
-    window.title("Settings")
-    window.resizable(False,False)
-    window.protocol("WM_DELETE_WINDOW", lambda: window.destroy())
-    
-    control = ttk.Notebook(window)
-    ftheme= ttk.Frame(window, padding="20")
-    proxy=ttk.Frame(window, padding="20")
-    if block_features.block_theme():
-        control.add(ftheme,text="Switch Theme")
-        control.grid(row=0, padx=5, pady=5)
-    control.add(proxy,text="Proxy")
-    control.grid(row=0, padx=5, pady=5)
-    if block_features.block_theme():
-        theme_tab=ttk.Frame(ftheme)
-        theme_tab.grid(row=0,column=0,padx=5, pady=5)
-    proxy_tab=ttk.Frame(proxy)
-    proxy_tab.grid(row=0,column=0,padx=5, pady=5)
-    if block_features.block_theme():
-        switch=tk.BooleanVar()
-        sw_theme=ttk.Checkbutton(theme_tab,text="Switch Theme",variable=switch,command=switch_theme,style="Switch.TCheckbutton")
-        sw_theme.grid(row=0,column=0,padx=20, pady=20)
-    enabled=tk.BooleanVar()
-    check=ttk.Checkbutton(proxy_tab,text="Enable Proxy",variable=enabled,style="Switch.TCheckbutton")
-    check.grid(row=0,column=0,columnspan=2,padx=20, pady=20)
-    # Proxy
-    proxy_label=ttk.Label(proxy_tab,text="HTTP(S) Proxy:")
-    #proxy_label.grid(row=1,column=0,padx=20, pady=20)
-    proxy_entry=ttk.Entry(proxy_tab,width=30)
-    #proxy_entry.grid(row=1,column=1,padx=20, pady=20)
-
-    port_label=ttk.Label(proxy_tab,text="Port:")
-    #port_label.grid(row=2,column=0,padx=20, pady=20)
-    port_entry=ttk.Entry(proxy_tab,width=10)
-    #port_entry.grid(row=2,column=1,padx=20, pady=20)
-    def uspa():
-        import proxy
-        try:
-            a=user.get()
-            if a and enabled.get():
-                proxy.password_set_status(True,1965)
-                username_label.grid(row=6,column=0,padx=20, pady=20)
-                username_entry.grid(row=6,column=1,padx=20, pady=20)
-                password_label.grid(row=7,column=0,padx=20, pady=20)
-                password_entry.grid(row=7,column=1,padx=20, pady=20)
-            else:
-                proxy.password_set_status(False,1965)
-                username_label.grid_forget()
-                username_entry.grid_forget()
-                password_label.grid_forget()
-                password_entry.grid_forget()
-        except:
-            pass
-    user=tk.BooleanVar()
-    checkuser=ttk.Checkbutton(proxy_tab,text="Proxy needs username and password",variable=user,style="Switch.TCheckbutton",command=uspa)
-    #checkuser.grid(row=5,column=0,columnspan=2,padx=20, pady=20)
-
-    username_label=ttk.Label(proxy_tab,text="Username:")
-    username_entry=ttk.Entry(proxy_tab,width=30)
-    password_label=ttk.Label(proxy_tab,text="Password:")
-    password_entry=ttk.Entry(proxy_tab,width=30,show="*")
-    threading.Thread(target=save_proxy, daemon=True).start()
-    threading.Thread(target=read_proxy, daemon=True).start()
-    threading.Thread(target=set_proxy_status, daemon=True).start()
-    check_proxy_status()
-    load_theme()
-
-
-
 
 def on_closing():
     global is_downloading
     if is_downloading:
         cancel_download()
-    save_theme()
+    settings_manager.save_theme()  # 使用settings_manager中的函数
     root.destroy()
     exit(0)
     subprocess.Popen("killall Python",text=True,shell=True)
@@ -808,7 +538,7 @@ if __name__ == "__main__" and block_features.block_start():
     help_menu = tk.Menu(menu_bar, tearoff=0)
     settings_menu = tk.Menu(menu_bar, tearoff=0)
     menu_bar.add_cascade(label="Settings", menu=settings_menu)
-    settings_menu.add_command(label="Settings",command=settings)
+    settings_menu.add_command(label="Settings", command=settings_manager.open_settings)  # 使用settings_manager中的函数
     menu_bar.add_cascade(label="Help", menu=help_menu)
     help_menu.add_command(label="About", command=show_about)
     help_menu.add_separator()
@@ -883,10 +613,9 @@ if __name__ == "__main__" and block_features.block_start():
     status_label.grid(row=7, column=0, columnspan=3, pady=20, padx=20)
 
     #PIP(UPDRADE)
-    pip_upgrade_button = ttk.Button(settings_tab, text="Upgrade pip",command=upgrade_pip)
+    pip_upgrade_button = ttk.Button(settings_tab, text="Upgrade pip", command=pip_manager.upgrade_pip)
     pip_upgrade_button.grid(row=0, column=0, columnspan=3, pady=20, padx=20)
 
-    upgrade_pip_button = pip_upgrade_button  # Alias for disabling/enabling later
     package_label = ttk.Label(settings_tab, text="Enter Package Name:")
     package_label.grid(row=1, column=0, pady=20, padx=20)
 
@@ -894,25 +623,27 @@ if __name__ == "__main__" and block_features.block_start():
     package_entry.grid(row=1, column=1, pady=20, padx=20)
 
     #PIP(INSTALL)
-    install_button = ttk.Button(settings_tab, text="Install Package", command=install_package)
+    install_button = ttk.Button(settings_tab, text="Install Package", command=pip_manager.install_package)
     install_button.grid(row=2, column=0, columnspan=3, pady=20, padx=20)
 
     #PIP(UNINSTALL)
-    uninstall_button = ttk.Button(settings_tab, text="Uninstall Package", command=uninstall_package)
+    uninstall_button = ttk.Button(settings_tab, text="Uninstall Package", command=pip_manager.uninstall_package)
     uninstall_button.grid(row=3, column=0, columnspan=3, pady=20, padx=20)
 
     #progressbar-options:length(number),mode(determinate(从左到右)，indeterminate(来回滚动)),...length=500,mode="indeterminate"
     package_label = ttk.Label(settings_tab, text="", padding="10")
     package_label.grid(row=7, column=0, columnspan=3, pady=20, padx=20)
     
-    
+    # 初始化pip_manager和settings_manager
+    pip_manager.init_ui_references(root, package_label, install_button, pip_upgrade_button, uninstall_button, package_entry)
+    settings_manager.init_settings_manager(root, config_path)
 
     # Set sv_ttk theme
     threading.Thread(target=python_file_reload, daemon=True).start()
     check_python_installation()
     threading.Thread(target=read_python_list, daemon=True).start()
     root.resizable(False,False)
-    load_theme()
+    settings_manager.load_theme()  # 使用settings_manager中的函数
     root.mainloop()
     #root.after(3000,)
 if block_features.block_start()==False:
