@@ -1,237 +1,181 @@
 """
-设置窗口主类，包含所有设置面板和控件
+设置窗口模块
+提供应用程序的设置界面
 """
-import os
-import sys
+
 import tkinter as tk
 from tkinter import ttk, messagebox
 import logging
 
-# 尝试导入sv_ttk主题包
-try:
-    import sv_ttk
-except ImportError:
-    logging.warning("sv_ttk未安装，将使用默认主题")
+# 导入设置面板
+from settings.ui.general import GeneralSettingsPanel
+from settings.ui.appearance import AppearanceSettingsPanel
+from settings.ui.download import DownloadSettingsPanel
+from settings.ui.proxy import ProxySettingsPanel
+from settings.ui.python import PythonSettingsPanel
+from settings.ui.advanced import AdvancedSettingsPanel
+
+logger = logging.getLogger(__name__)
 
 class SettingsWindow:
     """设置窗口类，管理所有设置面板"""
-    
-    def __init__(self, parent, settings_manager, theme_manager):
-        """
-        初始化设置窗口
-        
-        参数:
-            parent: 父窗口
-            settings_manager: 设置管理器实例
-            theme_manager: 主题管理器实例
-        """
+
+    def __init__(self, parent, settings_manager):
         self.parent = parent
         self.settings_manager = settings_manager
-        self.theme_manager = theme_manager
+        self.panels = []  # 存储所有设置面板
         
-        # 创建一个新的顶层窗口
+        # 创建设置窗口
         self.window = tk.Toplevel(parent)
         self.window.title("设置")
-        self.window.resizable(True, True)
-        self.window.protocol("WM_DELETE_WINDOW", self.on_cancel)
-        
-        # 确保窗口在屏幕中央
-        self.center_window()
-        
-        # 初始化界面
-        self.setup_ui()
-        
-        # 应用当前主题 - 先应用主题再初始化组件
-        self.apply_theme()
-        
-        # 设置窗口为模态（阻止与其他窗口的交互直到此窗口关闭）
         self.window.transient(parent)
         self.window.grab_set()
-        self.window.focus_set()
-    
-    def center_window(self):
-        """将窗口居中显示在屏幕上"""
-        # 增加窗口初始大小
-        width = 900
-        height = 700
-        screen_width = self.window.winfo_screenwidth()
-        screen_height = self.window.winfo_screenheight()
         
-        # 计算窗口的x,y坐标
-        x = (screen_width - width) // 2
-        y = (screen_height - height) // 2
+        # 设置居中显示
+        self.window.geometry("650x500")
+        self.window.resizable(True, True)
         
-        # 设置窗口位置和初始大小
-        self.window.geometry(f"{width}x{height}+{x}+{y}")
+        # 创建面板和按钮
+        self._create_ui()
         
-        # 等待UI完成初始化后再更新
+        # 居中显示
+        self._center_window()
+        
+    def _center_window(self):
+        """将窗口居中显示在父窗口上"""
         self.window.update_idletasks()
         
-        # 设置合理的最小大小，确保按钮可见
-        min_width = 800
-        min_height = 600
-        self.window.minsize(min_width, min_height)
-    
-    def setup_ui(self):
-        """设置用户界面"""
-        # 设置窗口的行列配置
-        self.window.columnconfigure(0, weight=1)
-        self.window.rowconfigure(0, weight=1)  # 让内容区域可以拉伸
-        self.window.rowconfigure(1, weight=0)  # 按钮区域不拉伸
+        # 获取父窗口和当前窗口的尺寸和位置
+        parent_width = self.parent.winfo_width()
+        parent_height = self.parent.winfo_height()
+        parent_x = self.parent.winfo_rootx()
+        parent_y = self.parent.winfo_rooty()
         
-        # 创建内容区域框架
-        content_frame = ttk.Frame(self.window, padding=5)
-        content_frame.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
+        width = self.window.winfo_width()
+        height = self.window.winfo_height()
         
-        # 创建选项卡
-        self.notebook = ttk.Notebook(content_frame)
-        self.notebook.pack(fill=tk.BOTH, expand=True)
+        # 计算居中位置
+        x = parent_x + (parent_width - width) // 2
+        y = parent_y + (parent_height - height) // 2
         
-        # 存储所有设置面板的引用
-        self.panels = {}
+        # 设置窗口位置
+        self.window.geometry(f"+{x}+{y}")
         
-        # 添加通用设置面板
-        from settings.ui.general import GeneralSettingsPanel
-        general_panel = GeneralSettingsPanel(self.notebook, self.settings_manager, self.theme_manager)
-        self.notebook.add(general_panel, text="通用")
-        self.panels['general'] = general_panel
+    def _create_ui(self):
+        """创建设置界面"""
+        # 创建主框架
+        main_frame = ttk.Frame(self.window, padding="10")
+        main_frame.pack(fill=tk.BOTH, expand=True)
         
-        # 添加外观设置面板
-        from settings.ui.appearance import AppearanceSettingsPanel
-        appearance_panel = AppearanceSettingsPanel(self.notebook, self.settings_manager, self.theme_manager)
-        self.notebook.add(appearance_panel, text="外观")
-        self.panels['appearance'] = appearance_panel
+        # 创建选项卡控件
+        tab_control = ttk.Notebook(main_frame)
+        tab_control.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         
-        # 添加下载设置面板
-        from settings.ui.download import DownloadSettingsPanel
-        download_panel = DownloadSettingsPanel(self.notebook, self.settings_manager)
-        self.notebook.add(download_panel, text="下载")
-        self.panels['download'] = download_panel
-        
-        # 添加代理设置面板
-        from settings.ui.proxy import ProxySettingsPanel
-        proxy_panel = ProxySettingsPanel(self.notebook, self.settings_manager)
-        self.notebook.add(proxy_panel, text="代理")
-        self.panels['proxy'] = proxy_panel
-        
-        # 添加Python设置面板
-        from settings.ui.python import PythonSettingsPanel
-        python_panel = PythonSettingsPanel(self.notebook, self.settings_manager)
-        self.notebook.add(python_panel, text="Python")
-        self.panels['python'] = python_panel
-        
-        # 添加高级设置面板
-        from settings.ui.advanced import AdvancedSettingsPanel
-        advanced_panel = AdvancedSettingsPanel(self.notebook, self.settings_manager)
-        self.notebook.add(advanced_panel, text="高级")
-        self.panels['advanced'] = advanced_panel
-        
-        # 底部按钮框架
-        button_frame = ttk.Frame(self.window, padding=5)
-        button_frame.grid(row=1, column=0, sticky="ew", padx=10, pady=10)
-        button_frame.columnconfigure(0, weight=1)  # 让左侧占据空间
-        
-        # 保存按钮
-        self.save_button = ttk.Button(
-            button_frame, 
-            text="保存",
-            command=self.on_save,
-            style="Accent.TButton"
-        )
-        self.save_button.grid(row=0, column=3, padx=5)
-        
-        # 取消按钮
-        self.cancel_button = ttk.Button(
-            button_frame, 
-            text="取消",
-            command=self.on_cancel
-        )
-        self.cancel_button.grid(row=0, column=2, padx=5)
-        
-        # 应用按钮
-        self.apply_button = ttk.Button(
-            button_frame, 
-            text="应用",
-            command=self.on_apply
-        )
-        self.apply_button.grid(row=0, column=1, padx=5)
-        
-        # 添加一个空的标签作为空间填充
-        spacer = ttk.Label(button_frame, text="")
-        spacer.grid(row=0, column=0, sticky="w")
-    
-    def apply_theme(self):
-        """应用当前主题到所有组件"""
+        # 创建各个设置面板
         try:
-            # 获取当前主题
-            current_theme = self.theme_manager.get_current_theme()
-            theme_type = "light"  # 默认亮色主题
+            # 常规设置选项卡
+            general_panel = GeneralSettingsPanel(tab_control, self.settings_manager)
+            tab_control.add(general_panel, text="常规设置")
+            self.panels.append(general_panel)
             
-            # 获取主题类型，支持不同的主题数据结构
-            if isinstance(current_theme, dict):
-                # 尝试从不同可能的键获取主题类型
-                theme_type = current_theme.get('type', 
-                            current_theme.get('mode', 
-                            current_theme.get('theme_type', 'light')))
+            # 外观设置选项卡
+            appearance_panel = AppearanceSettingsPanel(tab_control, self.settings_manager)
+            tab_control.add(appearance_panel, text="外观设置")
+            self.panels.append(appearance_panel)
             
-            # 确保类型是合法的
-            if theme_type not in ["light", "dark"]:
-                theme_type = "light"
-                
-            # 如果使用sv_ttk，应用对应的主题
-            if 'sv_ttk' in sys.modules:
-                import sv_ttk
-                sv_ttk.set_theme(theme_type)
-                logging.info(f"已应用sv_ttk主题: {theme_type}")
+            # 下载设置选项卡
+            download_panel = DownloadSettingsPanel(tab_control, self.settings_manager)
+            tab_control.add(download_panel, text="下载设置")
+            self.panels.append(download_panel)
             
-            # 应用主题到各个面板
-            for panel_name, panel in self.panels.items():
-                if hasattr(panel, 'apply_theme'):
-                    try:
-                        panel.apply_theme()
-                    except Exception as e:
-                        logging.error(f"应用主题到面板 {panel_name} 失败: {e}")
+            # 代理设置选项卡
+            proxy_panel = ProxySettingsPanel(tab_control, self.settings_manager)
+            tab_control.add(proxy_panel, text="代理设置")
+            self.panels.append(proxy_panel)
+            
+            # Python版本管理选项卡
+            python_panel = PythonSettingsPanel(tab_control, self.settings_manager)
+            tab_control.add(python_panel, text="Python版本")
+            self.panels.append(python_panel)
+            
+            # 高级设置选项卡
+            advanced_panel = AdvancedSettingsPanel(tab_control, self.settings_manager)
+            tab_control.add(advanced_panel, text="高级设置")
+            self.panels.append(advanced_panel)
+            
         except Exception as e:
-            logging.error(f"应用主题时出错: {e}")
+            logger.error(f"创建设置面板失败: {e}")
+            messagebox.showerror("错误", f"创建设置面板失败: {e}")
+        
+        # 添加确定和取消按钮
+        button_frame = ttk.Frame(main_frame)
+        button_frame.pack(fill=tk.X, padx=5, pady=5)
+        
+        # 添加应用按钮
+        apply_button = ttk.Button(button_frame, text="应用", command=self._apply_settings)
+        apply_button.pack(side=tk.RIGHT, padx=5)
+        
+        # 添加确定按钮
+        save_button = ttk.Button(button_frame, text="确定", command=self._save_settings)
+        save_button.pack(side=tk.RIGHT, padx=5)
+        
+        # 添加取消按钮
+        cancel_button = ttk.Button(button_frame, text="取消", command=self.window.destroy)
+        cancel_button.pack(side=tk.RIGHT, padx=5)
+        
+    def _save_settings(self):
+        """保存设置并关闭窗口"""
+        if self._validate_and_save_all():
+            # 保存到文件
+            if self.settings_manager.save_settings():
+                self.window.destroy()
+            else:
+                messagebox.showerror("错误", "保存设置失败")
     
-    def on_save(self):
-        """保存所有设置并关闭窗口"""
-        try:
-            # 收集各个面板的设置
-            for panel_name, panel in self.panels.items():
-                if hasattr(panel, 'save_settings'):
-                    panel.save_settings()
-            
-            # 保存设置到文件
-            self.settings_manager.save_settings()
-            logging.info("设置已保存")
-            
-            # 关闭窗口
-            self.window.destroy()
-        except Exception as e:
-            logging.error(f"保存设置时出错: {e}")
-            messagebox.showerror("保存失败", f"无法保存设置: {e}")
-    
-    def on_apply(self):
+    def _apply_settings(self):
         """应用设置但不关闭窗口"""
-        try:
-            # 收集各个面板的设置
-            for panel_name, panel in self.panels.items():
-                if hasattr(panel, 'save_settings'):
-                    panel.save_settings()
-            
-            # 保存设置到文件
-            self.settings_manager.save_settings()
-            logging.info("设置已应用")
-            
-            # 通知主窗口应用新设置
-            if hasattr(self.parent, 'apply_settings'):
-                self.parent.apply_settings()
-                
-        except Exception as e:
-            logging.error(f"应用设置时出错: {e}")
-            messagebox.showerror("应用失败", f"无法应用设置: {e}")
+        if self._validate_and_save_all():
+            # 保存到文件
+            if self.settings_manager.save_settings():
+                # 立即应用主题变更
+                try:
+                    # 检查是否有外观设置变更
+                    appearance_changed = False
+                    for panel in self.panels:
+                        if isinstance(panel, AppearanceSettingsPanel):
+                            appearance_changed = True
+                            break
+                    
+                    if appearance_changed:
+                        # 调用主题应用函数
+                        from pyquick import apply_theme
+                        apply_theme(refresh=True)
+                    
+                    messagebox.showinfo("提示", "设置已应用")
+                except Exception as e:
+                    logger.error(f"应用设置失败: {e}")
+                    messagebox.showerror("错误", f"应用设置失败: {e}")
+            else:
+                messagebox.showerror("错误", "应用设置失败")
     
-    def on_cancel(self):
-        """取消设置并关闭窗口"""
-        self.window.destroy() 
+    def _validate_and_save_all(self):
+        """验证并保存所有面板的设置"""
+        try:
+            # 验证所有面板的设置
+            for panel in self.panels:
+                if hasattr(panel, 'validate') and callable(panel.validate):
+                    if not panel.validate():
+                        return False
+            
+            # 保存所有面板的设置
+            for panel in self.panels:
+                if hasattr(panel, 'save_settings') and callable(panel.save_settings):
+                    if not panel.save_settings():
+                        logger.error(f"保存设置失败: {panel.__class__.__name__}")
+                        return False
+            
+            return True
+        except Exception as e:
+            logger.error(f"验证和保存设置时出错: {e}")
+            messagebox.showerror("错误", f"保存设置时出错: {e}")
+            return False

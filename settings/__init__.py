@@ -5,17 +5,15 @@ PyQuick设置管理模块
 """
 
 # 导出主要类和函数
-from settings.settings_manager import SettingsManager, ThemeManager
+from settings.settings_manager import SettingsManager
 from settings.settings_manager import init_manager, get_manager
-from settings.settings_manager import init_theme_manager, get_theme_manager
 from settings.ui import SettingsWindow
+from settings.python_manager import PythonManager
 
 __all__ = [
     'SettingsManager',
-    'ThemeManager',
     'SettingsWindow',
     'init_manager',
     'get_manager',
-    'init_theme_manager',
-    'get_theme_manager'
-] 
+    'PythonManager'
+]

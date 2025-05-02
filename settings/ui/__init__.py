@@ -5,7 +5,7 @@
 from settings.ui.window import SettingsWindow
 from settings.ui.base_panel import BaseSettingsPanel
 from settings.ui.general import GeneralSettingsPanel
-from settings.ui.appearance import AppearanceSettingsPanel
+
 from settings.ui.download import DownloadSettingsPanel
 from settings.ui.proxy import ProxySettingsPanel
 from settings.ui.python import PythonSettingsPanel

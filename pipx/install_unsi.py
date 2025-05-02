@@ -5,10 +5,19 @@ import logging
 import requests
 from typing import Tuple, Optional, Dict, Any
 from packaging import version
+import platform
 
-# 配置日志
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# 尝试获取日志记录器
+try:
+    from log import app_logger as logger
+except ImportError:
+    # 创建基本的日志记录器
+    logger = logging.getLogger("pipx")
+    logger.setLevel(logging.INFO)
+    handler = logging.StreamHandler()
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
 
 def verify_package_exists(package_name: str) -> Tuple[bool, Optional[str]]:
     """
@@ -98,146 +107,111 @@ def check_dependencies(package_name: str) -> Dict[str, Any]:
         logger.error(f"获取{package_name}依赖失败: {str(e)}")
         return {'runtime': [], 'optional': [], 'python_version': ''}
 
-def install_package(package_name: str, upgrade: bool = False) -> bool:
+def install_package(package_name, version=None, upgrade=False, show_output=True):
     """
-    安装或升级Python包
+    安装Python包
     
     Args:
-        package_name: 包名
-        upgrade: 是否升级已安装的包
+        package_name: 包名称
+        version: 特定版本，如果不指定则安装最新版本
+        upgrade: 是否升级现有包
+        show_output: 是否实时显示输出
         
     Returns:
-        是否安装成功
+        bool: 安装是否成功
     """
-    if not package_name:
-        logger.error("包名不能为空")
-        return False
-        
     try:
-        # 验证包是否存在
-        exists, latest_version = verify_package_exists(package_name)
-        if not exists:
-            logger.error(f"包 {package_name} 在PyPI上不存在")
+        if not package_name:
+            logger.error("未指定包名称")
             return False
             
-        # 检查已安装版本
-        current_version = get_installed_version(package_name)
-        if current_version and not upgrade:
-            logger.info(f"包 {package_name} ({current_version}) 已安装")
-            return True
+        package_spec = package_name
+        if version:
+            package_spec = f"{package_name}=={version}"
             
-        # 检查依赖
-        deps = check_dependencies(package_name)
-        if deps['python_version']:
-            logger.info(f"包 {package_name} 需要 Python {deps['python_version']}")
-            
-        if deps['runtime']:
-            logger.info(f"包 {package_name} 的运行时依赖: {', '.join(deps['runtime'])}")
+        logger.info(f"开始安装包: {package_spec}")
+        
+        # 根据系统选择合适的命令
+        if platform.system() == "Windows":
+            base_cmd = ["py", "-3", "-m", "pip"]
+        else:
+            base_cmd = ["pip3"]
             
         # 构建安装命令
-        cmd = [sys.executable, '-m', 'pip', 'install']
-        if upgrade:
-            cmd.append('--upgrade')
-        cmd.extend([
-            package_name,
-            '--disable-pip-version-check',
-            '--no-cache-dir'
-        ])
+        cmd = base_cmd + ["install"]
         
-        # 执行安装
+        if upgrade:
+            cmd.append("--upgrade")
+            
+        cmd.append(package_spec)
+        
+        # 执行安装命令
+        logger.info(f"执行命令: {' '.join(cmd)}")
         process = subprocess.Popen(
             cmd,
-            stdout=subprocess.PIPE,
+            stdout=subprocess.PIPE, 
             stderr=subprocess.PIPE,
             text=True
         )
         
-        # 实时获取输出
-        while True:
-            output = process.stdout.readline()
-            if output == '' and process.poll() is not None:
-                break
-            if output:
-                logger.info(output.strip())
-                
-        return_code = process.wait()
+        # 获取结果
+        stdout, stderr = process.communicate()
         
-        if return_code != 0:
-            error = process.stderr.read()
-            logger.error(f"安装失败: {error}")
-            return False
-            
-        # 验证安装
-        new_version = get_installed_version(package_name)
-        if new_version:
-            logger.info(f"包 {package_name} ({new_version}) 安装成功")
+        if process.returncode == 0:
+            logger.info(f"包 {package_name} 安装成功")
             return True
         else:
-            logger.error(f"包 {package_name} 安装后验证失败")
+            logger.error(f"包 {package_name} 安装失败: {stderr}")
             return False
             
     except Exception as e:
         logger.error(f"安装包 {package_name} 时出错: {str(e)}")
         return False
-
-def uninstall_package(package_name: str) -> bool:
+        
+def uninstall_package(package_name, show_output=True):
     """
     卸载Python包
     
     Args:
-        package_name: 包名
+        package_name: 包名称
+        show_output: 是否实时显示输出
         
     Returns:
-        是否卸载成功
+        bool: 卸载是否成功
     """
-    if not package_name:
-        logger.error("包名不能为空")
-        return False
-        
     try:
-        # 检查包是否已安装
-        current_version = get_installed_version(package_name)
-        if not current_version:
-            logger.info(f"包 {package_name} 未安装")
-            return True
+        if not package_name:
+            logger.error("未指定包名称")
+            return False
+            
+        logger.info(f"开始卸载包: {package_name}")
+        
+        # 根据系统选择合适的命令
+        if platform.system() == "Windows":
+            base_cmd = ["py", "-3", "-m", "pip"]
+        else:
+            base_cmd = ["pip3"]
             
         # 构建卸载命令
-        cmd = [
-            sys.executable, '-m', 'pip', 'uninstall',
-            package_name,
-            '-y',  # 自动确认
-            '--disable-pip-version-check'
-        ]
+        cmd = base_cmd + ["uninstall", "-y", package_name]
         
-        # 执行卸载
+        # 执行卸载命令
+        logger.info(f"执行命令: {' '.join(cmd)}")
         process = subprocess.Popen(
             cmd,
-            stdout=subprocess.PIPE,
+            stdout=subprocess.PIPE, 
             stderr=subprocess.PIPE,
             text=True
         )
         
-        # 实时获取输出
-        while True:
-            output = process.stdout.readline()
-            if output == '' and process.poll() is not None:
-                break
-            if output:
-                logger.info(output.strip())
-                
-        return_code = process.wait()
+        # 获取结果
+        stdout, stderr = process.communicate()
         
-        if return_code != 0:
-            error = process.stderr.read()
-            logger.error(f"卸载失败: {error}")
-            return False
-            
-        # 验证卸载
-        if get_installed_version(package_name) is None:
-            logger.info(f"包 {package_name} 已成功卸载")
+        if process.returncode == 0:
+            logger.info(f"包 {package_name} 卸载成功")
             return True
         else:
-            logger.error(f"包 {package_name} 卸载后仍然存在")
+            logger.error(f"包 {package_name} 卸载失败: {stderr}")
             return False
             
     except Exception as e:

@@ -1,17 +1,17 @@
 """
-高级设置面板，提供日志级别、调试选项和性能设置
+高级设置面板，用于管理应用程序高级选项和调试功能
 """
 import tkinter as tk
-from tkinter import ttk
+from tkinter import ttk, messagebox
 import logging
 import os
-import sys
+import shutil
 
 from settings.ui.base_panel import BaseSettingsPanel
 
 class AdvancedSettingsPanel(BaseSettingsPanel):
     """
-    高级设置面板类，管理日志、调试和性能等高级选项
+    高级设置面板类，管理应用程序高级选项和调试功能
     """
     
     def __init__(self, parent, settings_manager, theme_manager=None):
@@ -24,184 +24,199 @@ class AdvancedSettingsPanel(BaseSettingsPanel):
             theme_manager: 主题管理器实例
         """
         # 初始化变量
-        self.log_level_var = tk.StringVar()
-        self.log_to_file_var = tk.BooleanVar()
-        self.log_max_size_var = tk.IntVar()
-        self.log_backup_count_var = tk.IntVar()
         self.debug_mode_var = tk.BooleanVar()
-        self.dev_tools_var = tk.BooleanVar()
-        self.performance_mode_var = tk.StringVar()
-        self.memory_limit_var = tk.IntVar()
-        self.limit_memory_var = tk.BooleanVar()
-        self.auto_clean_temp_var = tk.BooleanVar()
-        self.clear_cache_days_var = tk.IntVar()
+        self.log_level_var = tk.StringVar()
+        self.clear_cache_var = tk.BooleanVar()
+        self.update_channel_var = tk.StringVar()
         
         # 调用父类初始化方法
         super().__init__(parent, settings_manager, theme_manager)
     
     def setup_ui(self):
         """设置高级设置面板的用户界面"""
-        # 日志设置
-        log_section, log_content = self.create_section_frame("日志设置")
-        
-        # 日志级别
-        level_frame = ttk.Frame(log_content)
-        level_frame.pack(fill=tk.X, pady=5)
-        
-        level_label = ttk.Label(level_frame, text="日志记录级别:")
-        level_label.pack(side=tk.LEFT, padx=5)
-        
-        log_levels = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
-        level_combo = ttk.Combobox(level_frame, textvariable=self.log_level_var, 
-                                  values=log_levels, state="readonly", width=10)
-        level_combo.pack(side=tk.LEFT, padx=5)
-        
-        # 日志文件选项
-        file_frame = ttk.Frame(log_content)
-        file_frame.pack(fill=tk.X, pady=5)
-        
-        file_check = ttk.Checkbutton(file_frame, text="将日志写入文件", 
-                                    variable=self.log_to_file_var,
-                                    command=self._toggle_log_file_options)
-        file_check.pack(side=tk.LEFT, padx=5)
-        
-        # 日志文件大小
-        size_frame = ttk.Frame(log_content)
-        size_frame.pack(fill=tk.X, pady=5)
-        
-        size_label = ttk.Label(size_frame, text="最大日志文件大小(MB):")
-        size_label.pack(side=tk.LEFT, padx=5)
-        
-        size_spin = ttk.Spinbox(size_frame, textvariable=self.log_max_size_var, 
-                               from_=1, to=100, width=5)
-        size_spin.pack(side=tk.LEFT, padx=5)
-        
-        # 日志文件备份数
-        backup_frame = ttk.Frame(log_content)
-        backup_frame.pack(fill=tk.X, pady=5)
-        
-        backup_label = ttk.Label(backup_frame, text="保留的日志文件数量:")
-        backup_label.pack(side=tk.LEFT, padx=5)
-        
-        backup_spin = ttk.Spinbox(backup_frame, textvariable=self.log_backup_count_var, 
-                                 from_=1, to=10, width=5)
-        backup_spin.pack(side=tk.LEFT, padx=5)
-        
-        # 查看日志按钮
-        view_log_button = ttk.Button(log_content, text="查看当前日志文件", 
-                                    command=self._view_log_file)
-        view_log_button.pack(anchor=tk.W, pady=5, padx=5)
-        
         # 调试设置
         debug_section, debug_content = self.create_section_frame("调试设置")
         
         # 调试模式
-        debug_check = ttk.Checkbutton(debug_content, text="启用调试模式", 
-                                     variable=self.debug_mode_var)
-        debug_check.pack(anchor=tk.W, padx=5, pady=5)
+        debug_frame = ttk.Frame(debug_content)
+        debug_frame.pack(fill=tk.X, pady=5)
         
-        # 开发者工具
-        dev_tools_check = ttk.Checkbutton(debug_content, text="显示开发者工具菜单", 
-                                         variable=self.dev_tools_var)
-        dev_tools_check.pack(anchor=tk.W, padx=5, pady=5)
+        debug_check = ttk.Checkbutton(debug_frame, text="启用调试模式", 
+                                    variable=self.debug_mode_var)
+        debug_check.pack(side=tk.LEFT, padx=5)
         
-        # 性能设置
-        perf_section, perf_content = self.create_section_frame("性能设置")
+        debug_tip = ttk.Label(debug_frame, 
+                            text="(启用后将显示更多技术信息，影响性能)",
+                            foreground="gray", font=("", 9))
+        debug_tip.pack(side=tk.LEFT, padx=5)
         
-        # 性能模式
-        mode_frame = ttk.Frame(perf_content)
-        mode_frame.pack(fill=tk.X, pady=5)
+        # 日志级别
+        log_frame = ttk.Frame(debug_content)
+        log_frame.pack(fill=tk.X, pady=5)
         
-        mode_label = ttk.Label(mode_frame, text="性能模式:")
-        mode_label.pack(side=tk.LEFT, padx=5)
+        log_label = ttk.Label(log_frame, text="日志级别:")
+        log_label.pack(side=tk.LEFT, padx=5)
         
-        modes = ["平衡", "高性能", "节能"]
-        mode_combo = ttk.Combobox(mode_frame, textvariable=self.performance_mode_var, 
-                                 values=modes, state="readonly", width=10)
-        mode_combo.pack(side=tk.LEFT, padx=5)
+        log_levels = ["debug", "info", "warning", "error"]
+        log_combobox = ttk.Combobox(log_frame, textvariable=self.log_level_var,
+                                  values=log_levels, state="readonly", width=10)
+        log_combobox.pack(side=tk.LEFT, padx=5)
         
-        # 内存限制
-        mem_check = ttk.Checkbutton(perf_content, text="限制内存使用", 
-                                   variable=self.limit_memory_var,
-                                   command=self._toggle_memory_limit)
-        mem_check.pack(anchor=tk.W, padx=5, pady=5)
+        # 缓存设置
+        cache_section, cache_content = self.create_section_frame("缓存设置")
         
-        mem_frame = ttk.Frame(perf_content)
-        mem_frame.pack(fill=tk.X, pady=5)
+        # 退出时清除缓存
+        cache_frame = ttk.Frame(cache_content)
+        cache_frame.pack(fill=tk.X, pady=5)
         
-        mem_label = ttk.Label(mem_frame, text="最大内存使用(MB):")
-        mem_label.pack(side=tk.LEFT, padx=5)
+        cache_check = ttk.Checkbutton(cache_frame, text="退出时清除缓存", 
+                                    variable=self.clear_cache_var)
+        cache_check.pack(side=tk.LEFT, padx=5)
         
-        mem_spin = ttk.Spinbox(mem_frame, textvariable=self.memory_limit_var, 
-                              from_=128, to=8192, width=6)
-        mem_spin.pack(side=tk.LEFT, padx=5)
+        # 清除缓存按钮
+        clear_button = ttk.Button(cache_frame, text="立即清除缓存", 
+                                command=self._clear_cache_now)
+        clear_button.pack(side=tk.RIGHT, padx=5)
         
-        # 清理设置
-        clean_section, clean_content = self.create_section_frame("临时文件清理")
+        # 更新设置
+        update_section, update_content = self.create_section_frame("更新设置")
         
-        # 自动清理
-        clean_check = ttk.Checkbutton(clean_content, text="自动清理临时文件", 
-                                     variable=self.auto_clean_temp_var,
-                                     command=self._toggle_clean_days)
-        clean_check.pack(anchor=tk.W, padx=5, pady=5)
+        # 更新渠道
+        channel_frame = ttk.Frame(update_content)
+        channel_frame.pack(fill=tk.X, pady=5)
         
-        # 清理天数
-        days_frame = ttk.Frame(clean_content)
-        days_frame.pack(fill=tk.X, pady=5)
+        channel_label = ttk.Label(channel_frame, text="更新渠道:")
+        channel_label.pack(side=tk.LEFT, padx=5)
         
-        days_label = ttk.Label(days_frame, text="清理超过这些天数的临时文件:")
-        days_label.pack(side=tk.LEFT, padx=5)
+        channels = ["stable", "beta", "dev"]
+        channel_combobox = ttk.Combobox(channel_frame, textvariable=self.update_channel_var,
+                                      values=channels, state="readonly", width=10)
+        channel_combobox.pack(side=tk.LEFT, padx=5)
         
-        days_spin = ttk.Spinbox(days_frame, textvariable=self.clear_cache_days_var, 
-                               from_=1, to=90, width=5)
-        days_spin.pack(side=tk.LEFT, padx=5)
+        # 渠道说明
+        channel_desc_frame = ttk.Frame(update_content)
+        channel_desc_frame.pack(fill=tk.X, pady=5)
         
-        # 立即清理按钮
-        clean_now_button = ttk.Button(clean_content, text="立即清理所有临时文件", 
-                                     command=self._clean_temp_files_now)
-        clean_now_button.pack(anchor=tk.W, pady=5, padx=5)
+        channel_desc = ttk.Label(channel_desc_frame, 
+                               text="stable: 稳定版本，推荐使用\n"
+                                    "beta: 测试版本，包含新功能\n"
+                                    "dev: 开发版本，可能不稳定",
+                               justify=tk.LEFT, font=("", 9))
+        channel_desc.pack(side=tk.LEFT, padx=5)
         
         # 重置设置
         reset_section, reset_content = self.create_section_frame("重置设置")
         
         # 重置按钮
         reset_frame = ttk.Frame(reset_content)
-        reset_frame.pack(fill=tk.X, pady=10)
+        reset_frame.pack(fill=tk.X, pady=5)
         
-        reset_all_button = ttk.Button(reset_frame, text="重置所有设置", 
+        reset_button = ttk.Button(reset_frame, text="重置所有设置为默认值", 
                                      command=self._reset_all_settings)
-        reset_all_button.pack(side=tk.LEFT, padx=5)
+        reset_button.pack(side=tk.RIGHT, padx=5)
         
-        reset_current_button = ttk.Button(reset_frame, text="重置高级设置", 
-                                        command=self._reset_advanced_settings)
-        reset_current_button.pack(side=tk.LEFT, padx=5)
+        reset_warning = ttk.Label(reset_frame, 
+                                text="警告: 此操作不可撤销", 
+                                foreground="red")
+        reset_warning.pack(side=tk.LEFT, padx=5)
+        
+    def _clear_cache_now(self):
+        """立即清除缓存"""
+        if messagebox.askyesno("清除缓存", "确定要清除所有缓存吗？"):
+            try:
+                # 获取缓存目录
+                config_path = self.settings_manager.config_path
+                cache_dir = os.path.join(config_path, "cache")
+                
+                # 如果缓存目录不存在，创建空目录
+                if not os.path.exists(cache_dir):
+                    os.makedirs(cache_dir, exist_ok=True)
+                    messagebox.showinfo("清除缓存", "缓存目录已创建，无需清除。")
+                    return
+                
+                # 删除缓存目录中的所有文件
+                for filename in os.listdir(cache_dir):
+                    file_path = os.path.join(cache_dir, filename)
+                    try:
+                        if os.path.isfile(file_path):
+                            os.unlink(file_path)
+                        elif os.path.isdir(file_path):
+                            shutil.rmtree(file_path)
+                    except Exception as e:
+                        logging.error(f"清除缓存文件失败: {e}")
+                
+                # 清除临时目录中的临时文件
+                temp_dir = os.path.join(config_path, "temp")
+                if os.path.exists(temp_dir):
+                    try:
+                        for filename in os.listdir(temp_dir):
+                            file_path = os.path.join(temp_dir, filename)
+                            if os.path.isfile(file_path):
+                                os.unlink(file_path)
+                    except Exception as e:
+                        logging.error(f"清除临时文件失败: {e}")
+                
+                # 清除崩溃日志
+                crash_dir = os.path.join(config_path, "crashes")
+                if os.path.exists(crash_dir):
+                    try:
+                        for filename in os.listdir(crash_dir):
+                            if filename.endswith(".log") or filename.endswith(".dmp"):
+                                file_path = os.path.join(crash_dir, filename)
+                                os.unlink(file_path)
+                    except Exception as e:
+                        logging.error(f"清除崩溃日志失败: {e}")
+                
+                messagebox.showinfo("清除缓存", "已成功清除所有缓存文件！")
+                logging.info("已手动清除所有缓存文件")
+            except Exception as e:
+                messagebox.showerror("清除缓存", f"清除缓存时出错: {e}")
+                logging.error(f"清除缓存时出错: {e}")
+    
+    def _reset_all_settings(self):
+        """重置所有设置为默认值"""
+        if messagebox.askyesno("重置设置", 
+                              "确定要将所有设置重置为默认值吗？\n"
+                              "此操作将删除所有自定义设置，且不可撤销！"):
+            try:
+                # 创建一个确认对话框
+                confirm = messagebox.askokcancel("确认重置", 
+                                               "最后确认：\n"
+                                               "重置将清除所有自定义设置，包括下载路径、代理设置等，"
+                                               "并恢复到默认状态。\n\n"
+                                               "确定要继续吗？")
+                if confirm:
+                    # 删除设置文件
+                    settings_file = self.settings_manager.settings_file
+                    if os.path.exists(settings_file):
+                        os.unlink(settings_file)
+                        
+                    # 重新初始化设置管理器
+                    self.settings_manager._init_default_settings()
+                    self.settings_manager.save_settings()
+                    
+                    # 重新加载设置到UI
+                    self.load_settings()
+                    
+                    # 通知用户
+                    messagebox.showinfo("重置设置", "所有设置已重置为默认值！\n重启应用后生效。")
+                    logging.info("用户已手动重置所有设置为默认值")
+            except Exception as e:
+                messagebox.showerror("重置设置", f"重置设置时出错: {e}")
+                logging.error(f"重置设置时出错: {e}")
     
     def load_settings(self):
         """从设置管理器加载设置"""
         try:
-            # 日志设置
-            self.log_level_var.set(self.settings_manager.get("advanced.log_level", "INFO"))
-            self.log_to_file_var.set(self.settings_manager.get("advanced.log_to_file", True))
-            self.log_max_size_var.set(self.settings_manager.get("advanced.log_max_size", 10))
-            self.log_backup_count_var.set(self.settings_manager.get("advanced.log_backup_count", 3))
-            
             # 调试设置
             self.debug_mode_var.set(self.settings_manager.get("advanced.debug_mode", False))
-            self.dev_tools_var.set(self.settings_manager.get("advanced.dev_tools", False))
+            self.log_level_var.set(self.settings_manager.get("advanced.log_level", "info"))
             
-            # 性能设置
-            self.performance_mode_var.set(self.settings_manager.get("advanced.performance_mode", "平衡"))
-            self.limit_memory_var.set(self.settings_manager.get("advanced.limit_memory", False))
-            self.memory_limit_var.set(self.settings_manager.get("advanced.memory_limit", 512))
+            # 缓存设置
+            self.clear_cache_var.set(self.settings_manager.get("advanced.clear_cache_on_exit", False))
             
-            # 清理设置
-            self.auto_clean_temp_var.set(self.settings_manager.get("advanced.auto_clean_temp", True))
-            self.clear_cache_days_var.set(self.settings_manager.get("advanced.clear_cache_days", 7))
-            
-            # 更新UI状态
-            self._toggle_log_file_options()
-            self._toggle_memory_limit()
-            self._toggle_clean_days()
+            # 更新设置
+            self.update_channel_var.set(self.settings_manager.get("advanced.update_channel", "stable"))
             
             logging.debug("高级设置加载成功")
         except Exception as e:
@@ -210,214 +225,18 @@ class AdvancedSettingsPanel(BaseSettingsPanel):
     def save_settings(self):
         """保存设置到设置管理器"""
         try:
-            # 日志设置
-            self.settings_manager.set("advanced.log_level", self.log_level_var.get())
-            self.settings_manager.set("advanced.log_to_file", self.log_to_file_var.get())
-            self.settings_manager.set("advanced.log_max_size", self.log_max_size_var.get())
-            self.settings_manager.set("advanced.log_backup_count", self.log_backup_count_var.get())
-            
             # 调试设置
             self.settings_manager.set("advanced.debug_mode", self.debug_mode_var.get())
-            self.settings_manager.set("advanced.dev_tools", self.dev_tools_var.get())
+            self.settings_manager.set("advanced.log_level", self.log_level_var.get())
             
-            # 性能设置
-            self.settings_manager.set("advanced.performance_mode", self.performance_mode_var.get())
-            self.settings_manager.set("advanced.limit_memory", self.limit_memory_var.get())
-            self.settings_manager.set("advanced.memory_limit", self.memory_limit_var.get())
+            # 缓存设置
+            self.settings_manager.set("advanced.clear_cache_on_exit", self.clear_cache_var.get())
             
-            # 清理设置
-            self.settings_manager.set("advanced.auto_clean_temp", self.auto_clean_temp_var.get())
-            self.settings_manager.set("advanced.clear_cache_days", self.clear_cache_days_var.get())
-            
-            # 应用日志设置
-            self._apply_log_settings()
+            # 更新设置
+            self.settings_manager.set("advanced.update_channel", self.update_channel_var.get())
             
             logging.debug("高级设置保存成功")
             return True
         except Exception as e:
             logging.error(f"保存高级设置时出错: {e}")
             return False
-    
-    def _toggle_log_file_options(self):
-        """根据日志文件选项启用或禁用相关字段"""
-        for child in self.winfo_children():
-            if isinstance(child, ttk.LabelFrame):
-                if "日志设置" in child.cget("text"):
-                    for frame in child.winfo_children():
-                        if isinstance(frame, ttk.Frame):
-                            if "最大日志" in frame.winfo_children()[0].cget("text") or \
-                               "保留的日志" in frame.winfo_children()[0].cget("text"):
-                                for widget in frame.winfo_children():
-                                    if isinstance(widget, ttk.Spinbox):
-                                        if self.log_to_file_var.get():
-                                            widget.configure(state="normal")
-                                        else:
-                                            widget.configure(state="disabled")
-    
-    def _toggle_memory_limit(self):
-        """根据内存限制选项启用或禁用相关字段"""
-        for child in self.winfo_children():
-            if isinstance(child, ttk.LabelFrame):
-                if "性能设置" in child.cget("text"):
-                    for frame in child.winfo_children():
-                        if isinstance(frame, ttk.Frame) and "最大内存" in frame.winfo_children()[0].cget("text"):
-                            for widget in frame.winfo_children():
-                                if isinstance(widget, ttk.Spinbox):
-                                    if self.limit_memory_var.get():
-                                        widget.configure(state="normal")
-                                    else:
-                                        widget.configure(state="disabled")
-    
-    def _toggle_clean_days(self):
-        """根据自动清理选项启用或禁用相关字段"""
-        for child in self.winfo_children():
-            if isinstance(child, ttk.LabelFrame):
-                if "临时文件清理" in child.cget("text"):
-                    for frame in child.winfo_children():
-                        if isinstance(frame, ttk.Frame) and "清理超过" in frame.winfo_children()[0].cget("text"):
-                            for widget in frame.winfo_children():
-                                if isinstance(widget, ttk.Spinbox):
-                                    if self.auto_clean_temp_var.get():
-                                        widget.configure(state="normal")
-                                    else:
-                                        widget.configure(state="disabled")
-    
-    def _apply_log_settings(self):
-        """应用日志设置"""
-        try:
-            # 获取当前日志级别
-            level_name = self.log_level_var.get()
-            level = getattr(logging, level_name)
-            
-            # 设置根日志记录器级别
-            logging.getLogger().setLevel(level)
-            
-            # 如果日志处理器已经存在，更新它们
-            for handler in logging.getLogger().handlers:
-                handler.setLevel(level)
-                
-                # 更新文件处理器
-                if hasattr(handler, 'baseFilename'):
-                    if not self.log_to_file_var.get():
-                        logging.getLogger().removeHandler(handler)
-                    else:
-                        # 更新大小和备份数量 (对于RotatingFileHandler)
-                        if hasattr(handler, 'maxBytes'):
-                            max_size_bytes = self.log_max_size_var.get() * 1024 * 1024
-                            handler.maxBytes = max_size_bytes
-                            
-                        if hasattr(handler, 'backupCount'):
-                            handler.backupCount = self.log_backup_count_var.get()
-            
-            logging.info(f"已应用日志设置: 级别={level_name}, 文件记录={self.log_to_file_var.get()}")
-        except Exception as e:
-            logging.error(f"应用日志设置时出错: {e}")
-    
-    def _view_log_file(self):
-        """查看当前日志文件"""
-        from tkinter import messagebox
-        import subprocess
-        
-        # 查找当前日志文件
-        log_file = None
-        for handler in logging.getLogger().handlers:
-            if hasattr(handler, 'baseFilename'):
-                log_file = handler.baseFilename
-                break
-        
-        if not log_file or not os.path.exists(log_file):
-            messagebox.showinfo("日志文件", "当前没有活动的日志文件")
-            return
-            
-        try:
-            # 尝试用系统默认应用打开日志文件
-            if sys.platform == "win32":
-                os.startfile(log_file)
-            elif sys.platform == "darwin":
-                subprocess.call(["open", log_file])
-            else:
-                subprocess.call(["xdg-open", log_file])
-                
-            logging.debug(f"已打开日志文件: {log_file}")
-        except Exception as e:
-            messagebox.showerror("错误", f"无法打开日志文件: {e}")
-            logging.error(f"打开日志文件时出错: {e}")
-    
-    def _clean_temp_files_now(self):
-        """立即清理所有临时文件"""
-        from tkinter import messagebox
-        import tempfile
-        import time
-        import shutil
-        
-        try:
-            # 清理应用临时目录
-            app_temp_dir = os.path.join(tempfile.gettempdir(), "pyquick")
-            if os.path.exists(app_temp_dir):
-                shutil.rmtree(app_temp_dir, ignore_errors=True)
-                
-            # 清理下载缓存
-            cache_dir = os.path.join(os.path.expanduser("~"), ".pyquick", "cache")
-            if os.path.exists(cache_dir):
-                shutil.rmtree(cache_dir, ignore_errors=True)
-                
-            # 清理会话文件
-            session_dir = os.path.join(os.path.expanduser("~"), ".pyquick", "sessions")
-            if os.path.exists(session_dir):
-                shutil.rmtree(session_dir, ignore_errors=True)
-                
-            # 清理过时的日志文件
-            log_dir = os.path.join(os.path.expanduser("~"), ".pyquick", "logs")
-            if os.path.exists(log_dir):
-                now = time.time()
-                for f in os.listdir(log_dir):
-                    if f.endswith(".log") and f != "pyquick.log":
-                        file_path = os.path.join(log_dir, f)
-                        if os.path.isfile(file_path):
-                            os.remove(file_path)
-                
-            messagebox.showinfo("清理完成", "所有临时文件已清理")
-            logging.info("所有临时文件已手动清理")
-        except Exception as e:
-            messagebox.showerror("清理失败", f"清理临时文件时出错: {e}")
-            logging.error(f"清理临时文件时出错: {e}")
-    
-    def _reset_all_settings(self):
-        """重置所有设置"""
-        from tkinter import messagebox
-        
-        if messagebox.askyesno("确认重置", 
-                              "确定要重置所有设置为默认值吗？\n\n此操作不可撤销。"):
-            try:
-                # 重置所有设置
-                self.settings_manager.reset_to_defaults()
-                
-                # 重新加载当前面板设置
-                self.load_settings()
-                
-                messagebox.showinfo("重置完成", 
-                                   "所有设置已重置为默认值。\n\n请点击保存以应用更改。")
-                logging.info("已重置所有设置为默认值")
-            except Exception as e:
-                messagebox.showerror("重置失败", f"重置设置时出错: {e}")
-                logging.error(f"重置所有设置时出错: {e}")
-    
-    def _reset_advanced_settings(self):
-        """重置高级设置"""
-        from tkinter import messagebox
-        
-        if messagebox.askyesno("确认重置", 
-                              "确定要重置高级设置为默认值吗？"):
-            try:
-                # 仅重置高级设置
-                self.settings_manager.reset_to_defaults("advanced")
-                
-                # 重新加载当前面板设置
-                self.load_settings()
-                
-                messagebox.showinfo("重置完成", 
-                                   "高级设置已重置为默认值。\n\n请点击保存以应用更改。")
-                logging.info("已重置高级设置为默认值")
-            except Exception as e:
-                messagebox.showerror("重置失败", f"重置高级设置时出错: {e}")
-                logging.error(f"重置高级设置时出错: {e}") 

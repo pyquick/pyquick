@@ -4,7 +4,7 @@ import psutil
 import os
 import time
 import threading
-from .debug_info import get_system_info, get_memory_usage
+from .debug_info import get_system_info, get_memory_usage, preload_disk_info, get_disk_info
 
 # 尝试导入日志模块
 try:
@@ -20,18 +20,32 @@ class DebugInfoWindow(tk.Toplevel):
     _instance = None
     _initialized = False
     
+    @staticmethod
+    def should_show_menu(debug_mode=False):
+        """
+        判断是否应显示调试信息菜单项
+        
+        Args:
+            debug_mode: 是否处于调试模式
+        
+        Returns:
+            bool: 是否应显示菜单项
+        """
+        return debug_mode
+    
     def __new__(cls, *args, **kwargs):
         """单例模式实现"""
         if not cls._instance:
             cls._instance = super().__new__(cls)
         return cls._instance
         
-    def __init__(self, lazy_load=True):
+    def __init__(self, lazy_load=True, debug_mode=False):
         """
         初始化调试信息窗口
 
         Args:
             lazy_load: 是否延迟加载内容（提高启动性能）
+            debug_mode: 是否处于调试模式
         """
         if DebugInfoWindow._initialized:
             # 如果已经初始化过，仅确保窗口显示
@@ -41,6 +55,9 @@ class DebugInfoWindow(tk.Toplevel):
         # 正确调用父类初始化
         tk.Toplevel.__init__(self)
         DebugInfoWindow._initialized = True
+        
+        # 调试模式标志
+        self.debug_mode = debug_mode
 
         # 基本窗口配置
         self.title("系统调试信息")
@@ -56,6 +73,7 @@ class DebugInfoWindow(tk.Toplevel):
         self.log_file_paths = {}
         self.auto_refresh_log = False
         self.log_refresh_job = None
+        self.log_category_var = tk.StringVar(value="全部")
 
         # 定义样式 (Corrected Indentation)
         self.style = ttk.Style()
@@ -63,6 +81,9 @@ class DebugInfoWindow(tk.Toplevel):
         self.style.configure("Warning.TLabel", foreground="orange")
         self.style.configure("Good.TLabel", foreground="green")
         self.style.configure("Info.TLabel", foreground="blue")
+        
+        # 预加载磁盘信息
+        preload_disk_info()
 
         # 创建UI框架
         self.setup_ui_framework()
@@ -273,147 +294,125 @@ class DebugInfoWindow(tk.Toplevel):
         self.disk_progressbars = {}
 
     def initialize_log_tab(self):
-        """初始化日志信息标签页内容"""
-        # 创建日志显示框架
-        log_frame = ttk.Frame(self.log_tab)
-        log_frame.grid(row=0, column=0, sticky='nsew', padx=5, pady=5)
-        log_frame.grid_columnconfigure(0, weight=1)
-        log_frame.grid_rowconfigure(1, weight=1)
-
-        # 创建日志文件选择下拉框
-        select_frame = ttk.Frame(log_frame)
-        select_frame.grid(row=0, column=0, sticky='ew', padx=5, pady=5)
-        select_frame.grid_columnconfigure(1, weight=1)
-
-        ttk.Label(select_frame, text="选择日志文件:").grid(row=0, column=0, padx=5)
-
+        """初始化日志标签页内容"""
+        main_frame = ttk.Frame(self.log_tab, padding="5")
+        main_frame.grid(row=0, column=0, sticky='nsew')
+        main_frame.grid_rowconfigure(1, weight=1)
+        main_frame.grid_columnconfigure(0, weight=1)
+        
+        # 控制面板
+        control_frame = ttk.Frame(main_frame)
+        control_frame.grid(row=0, column=0, sticky='ew', padx=5, pady=5)
+        
+        # 类别选择
+        ttk.Label(control_frame, text="日志类别:").grid(row=0, column=0, padx=5, pady=5, sticky='w')
+        
+        # 获取所有日志文件
+        log_files = get_all_log_files() if HAS_LOG_MODULE else []
+        
+        # 提取日志类别
+        categories = ["全部"]
+        for file_path in log_files:
+            file_name = os.path.basename(file_path)
+            # 假设格式是 app_name_category.log
+            parts = file_name.split('_')
+            if len(parts) > 1:
+                category = parts[1].split('.')[0]  # 提取类别部分
+                if category not in categories:
+                    categories.append(category)
+        
+        category_combo = ttk.Combobox(control_frame, textvariable=self.log_category_var, 
+                                     values=categories, state="readonly", width=10)
+        category_combo.grid(row=0, column=1, padx=5, pady=5, sticky='w')
+        category_combo.bind("<<ComboboxSelected>>", lambda e: self.refresh_log_files())
+        
+        # 文件下拉框
+        ttk.Label(control_frame, text="日志文件:").grid(row=0, column=2, padx=5, pady=5, sticky='w')
+        
         self.log_file_var = tk.StringVar()
-        self.log_combo = ttk.Combobox(select_frame, textvariable=self.log_file_var, state="readonly", width=50)
-        self.log_combo.grid(row=0, column=1, padx=5, sticky='ew')
-
-        refresh_log_btn = ttk.Button(select_frame, text="刷新文件列表", command=self.refresh_log_files)
-        refresh_log_btn.grid(row=0, column=2, padx=5)
-
-        # 创建日志内容文本框和双向滚动条
-        log_content_frame = ttk.LabelFrame(log_frame, text="日志内容")
-        log_content_frame.grid(row=1, column=0, sticky='nsew', padx=5, pady=5)
-        log_content_frame.grid_columnconfigure(0, weight=1)
-        log_content_frame.grid_rowconfigure(0, weight=1)
-
-        # 创建带两个滚动条的文本框框架
-        text_frame = ttk.Frame(log_content_frame)
-        text_frame.grid(row=0, column=0, sticky='nsew', padx=5, pady=5)
-        text_frame.grid_columnconfigure(0, weight=1)
-        text_frame.grid_rowconfigure(0, weight=1)
-
-        # 创建文本框和滚动条
-        self.log_text = tk.Text(text_frame, wrap=tk.NONE, background='white',
-                              font=('Consolas', 10))
-
-        y_scrollbar = ttk.Scrollbar(text_frame, orient="vertical", command=self.log_text.yview)
-        x_scrollbar = ttk.Scrollbar(text_frame, orient="horizontal", command=self.log_text.xview)
-
-        self.log_text.configure(yscrollcommand=y_scrollbar.set, xscrollcommand=x_scrollbar.set)
-
-        # 放置文本框和滚动条
-        self.log_text.grid(row=0, column=0, sticky='nsew')
-        y_scrollbar.grid(row=0, column=1, sticky='ns')
-        x_scrollbar.grid(row=1, column=0, sticky='ew')
-
-        # 创建按钮框架
-        button_frame = ttk.Frame(log_frame)
-        button_frame.grid(row=2, column=0, sticky='ew', padx=5, pady=5)
-
-        view_btn = ttk.Button(button_frame, text="查看日志", command=self.view_log)
-        view_btn.grid(row=0, column=0, padx=5)
-
-        refresh_btn = ttk.Button(button_frame, text="刷新内容", command=self.refresh_log_content)
-        refresh_btn.grid(row=0, column=1, padx=5)
-
-        # 创建自动刷新选项
+        self.log_file_combo = ttk.Combobox(control_frame, textvariable=self.log_file_var, state="readonly", width=25)
+        self.log_file_combo.grid(row=0, column=3, padx=5, pady=5, sticky='w')
+        self.log_file_combo.bind("<<ComboboxSelected>>", lambda e: self.view_log())
+        
+        # 刷新按钮
+        refresh_btn = ttk.Button(control_frame, text="刷新", command=self.refresh_log_files)
+        refresh_btn.grid(row=0, column=4, padx=5, pady=5, sticky='w')
+        
+        # 自动刷新开关
         self.auto_refresh_var = tk.BooleanVar(value=False)
-        auto_refresh_check = ttk.Checkbutton(button_frame, text="自动刷新",
+        auto_refresh_check = ttk.Checkbutton(control_frame, text="自动刷新", 
                                            variable=self.auto_refresh_var,
                                            command=self.toggle_auto_refresh)
-        auto_refresh_check.grid(row=0, column=2, padx=5)
-
-        # 添加日志过滤功能
-        filter_frame = ttk.Frame(button_frame)
-        filter_frame.grid(row=0, column=3, padx=10)
-
-        ttk.Label(filter_frame, text="过滤:").grid(row=0, column=0, padx=2)
+        auto_refresh_check.grid(row=0, column=5, padx=5, pady=5, sticky='w')
+        
+        # 筛选框
+        ttk.Label(control_frame, text="筛选:").grid(row=0, column=6, padx=5, pady=5, sticky='w')
+        
         self.filter_var = tk.StringVar()
-        filter_entry = ttk.Entry(filter_frame, textvariable=self.filter_var, width=15)
-        filter_entry.grid(row=0, column=1, padx=2)
-
-        filter_btn = ttk.Button(filter_frame, text="应用", command=self.apply_log_filter)
-        filter_btn.grid(row=0, column=2, padx=2)
-
-        clear_btn = ttk.Button(filter_frame, text="清除", command=lambda: self.filter_var.set("") or self.apply_log_filter())
-        clear_btn.grid(row=0, column=3, padx=2)
-
-        # 初始化日志文件列表
+        filter_entry = ttk.Entry(control_frame, textvariable=self.filter_var, width=15)
+        filter_entry.grid(row=0, column=7, padx=5, pady=5, sticky='w')
+        filter_entry.bind("<Return>", lambda e: self.apply_log_filter())
+        
+        # 内容面板
+        content_frame = ttk.Frame(main_frame)
+        content_frame.grid(row=1, column=0, sticky='nsew', padx=5, pady=5)
+        content_frame.grid_rowconfigure(0, weight=1)
+        content_frame.grid_columnconfigure(0, weight=1)
+        
+        # 日志内容框
+        self.log_text = scrolledtext.ScrolledText(content_frame, wrap=tk.WORD)
+        self.log_text.grid(row=0, column=0, sticky='nsew')
+        self.log_text.config(state=tk.DISABLED)
+        
+        # 初始化文件列表
         self.refresh_log_files()
-
-        # 绑定选择事件
-        self.log_combo.bind("<<ComboboxSelected>>", lambda e: self.view_log())
-
-        # 添加快捷键
-        self.log_text.bind("<Control-f>", lambda e: filter_entry.focus_set())
-
-    def toggle_auto_refresh(self):
-        """切换自动刷新日志功能"""
-        self.auto_refresh = self.auto_refresh_var.get()
-
-        if self.auto_refresh:
-            # 如果启用自动刷新，则每5秒刷新一次
-            self.schedule_log_refresh()
-        elif self.log_refresh_job:
-            # 如果禁用自动刷新，则取消定时任务
-            self.after_cancel(self.log_refresh_job)
-            self.log_refresh_job = None
-
-    def schedule_log_refresh(self):
-        """安排下一次日志刷新"""
-        if self.auto_refresh:
-            self.refresh_log_content()
-            self.log_refresh_job = self.after(5000, self.schedule_log_refresh)
-
-    def apply_log_filter(self):
-        """应用日志过滤器"""
-        self.refresh_log_content()
-
+        
     def refresh_log_files(self):
-        """刷新日志文件列表"""
-        if not HAS_LOG_MODULE:
-            return
-
+        """刷新日志文件列表，按类别筛选"""
         try:
+            if not HAS_LOG_MODULE:
+                return
+                
             log_files = get_all_log_files()
-
-            # 提取文件名（不含路径）
-            file_names = []
+            
+            # 获取当前选择的类别
+            category = self.log_category_var.get()
+            
+            # 筛选文件
+            filtered_files = []
             self.log_file_paths = {}
-
-            for path in log_files:
-                name = os.path.basename(path)
-                file_names.append(name)
-                self.log_file_paths[name] = path
-
-            # 按修改时间排序（最新的在前面）
-            file_names.sort(key=lambda x: os.path.getmtime(self.log_file_paths[x]), reverse=True)
-
+            
+            for file_path in log_files:
+                file_name = os.path.basename(file_path)
+                
+                # 如果选择了特定类别，则只显示该类别的日志
+                if category != "全部":
+                    parts = file_name.split('_')
+                    if len(parts) > 1:
+                        file_category = parts[1].split('.')[0]  # 提取类别部分
+                        if file_category != category:
+                            continue
+                
+                # 添加到文件列表
+                display_name = f"{file_name} ({os.path.getsize(file_path)/1024:.1f}KB)"
+                filtered_files.append(display_name)
+                self.log_file_paths[display_name] = file_path
+            
             # 更新下拉框
-            self.log_combo['values'] = file_names
-
-            # 如果有日志文件，默认选择第一个
-            if file_names:
-                self.log_combo.current(0)
+            self.log_file_combo['values'] = filtered_files
+            
+            # 如果当前选择的文件不在列表中，重置选择
+            if self.log_file_var.get() not in filtered_files and filtered_files:
+                self.log_file_combo.current(0)
                 self.view_log()
-
+                
         except Exception as e:
+            if app_logger:
+                app_logger.error(f"刷新日志文件列表出错: {e}")
+            self.log_text.config(state=tk.NORMAL)
             self.log_text.delete(1.0, tk.END)
-            self.log_text.insert(tk.END, f"获取日志文件出错: {str(e)}")
+            self.log_text.insert(tk.END, f"刷新日志文件列表出错: {e}")
+            self.log_text.config(state=tk.DISABLED)
 
     def view_log(self):
         """查看所选日志文件内容"""
@@ -675,3 +674,25 @@ class DebugInfoWindow(tk.Toplevel):
         
         # 调用父类销毁方法
         super().destroy()
+
+    def toggle_auto_refresh(self):
+        """切换自动刷新日志功能"""
+        self.auto_refresh = self.auto_refresh_var.get()
+
+        if self.auto_refresh:
+            # 如果启用自动刷新，则每5秒刷新一次
+            self.schedule_log_refresh()
+        elif self.log_refresh_job:
+            # 如果禁用自动刷新，则取消定时任务
+            self.after_cancel(self.log_refresh_job)
+            self.log_refresh_job = None
+
+    def schedule_log_refresh(self):
+        """安排下一次日志刷新"""
+        if self.auto_refresh:
+            self.refresh_log_content()
+            self.log_refresh_job = self.after(5000, self.schedule_log_refresh)
+
+    def apply_log_filter(self):
+        """应用日志过滤器"""
+        self.refresh_log_content()
