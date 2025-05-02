@@ -1,0 +1,32 @@
+{
+    "name": "light",
+    "display_name": "浅色主题",
+    "colors": {
+        "primary": "#007acc",
+        "secondary": "#0098ff",
+        "background": "#ffffff",
+        "surface": "#f5f5f5",
+        "text": "#000000",
+        "text_secondary": "#666666",
+        "border": "#e0e0e0",
+        "success": "#28a745",
+        "warning": "#ffc107",
+        "error": "#dc3545",
+        "info": "#17a2b8"
+    },
+    "fonts": {
+        "default": {
+            "family": "系统默认",
+            "size": 12
+        },
+        "title": {
+            "family": "系统默认",
+            "size": 14,
+            "weight": "bold"
+        },
+        "small": {
+            "family": "系统默认",
+            "size": 10
+        }
+    }
+}

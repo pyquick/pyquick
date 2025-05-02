@@ -268,20 +268,51 @@ class MultiThreadDownloader:
                             
                         if chunk:
                             f.write(chunk)
-                            chunk_size = len(chunk)
+                            chunk_len = len(chunk)
                             
                             with self.lock:
-                                self.task.downloaded_size += chunk_size
-                                self.speed_calculator.add_bytes(chunk_size)
-                                
-                                # 节流进度更新
-                                current_time = time.time()
-                                if current_time - self.last_progress_update >= self.progress_update_interval:
-                                    speed = self.speed_calculator.get_speed()
-                                    progress = (self.task.downloaded_size / self.task.content_length) * 100
-                                    self.task.update_progress(self.task.downloaded_size, speed)
-                                    self.last_progress_update = current_time
-            
+                                try:
+                                    # 安全地更新进度信息
+                                    downloaded_size = int(self.task.downloaded_size + chunk_len)
+                                    self.task.downloaded_size = downloaded_size
+                                    
+                                    # 计算下载速度
+                                    current_time = time.time()
+                                    time_diff = current_time - self.last_progress_update
+                                    if time_diff >= self.progress_update_interval:
+                                        speed = float(chunk_len / time_diff)
+                                        
+                                        # 更新任务进度
+                                        self.task.update_progress(downloaded_size, speed)
+                                        self.last_progress_update = current_time
+                                        
+                                        # 调用进度回调
+                                        if self.progress_callback:
+                                            self.progress_callback(
+                                                self.task.task_id,
+                                                downloaded_size,
+                                                float(self.task.progress),
+                                                speed
+                                            )
+                                            
+                                except (ValueError, TypeError) as e:
+                                    self.logger.error(f"Error updating progress in thread {thread_index}: {str(e)}")
+                                    
+                                except Exception as e:
+                                    self.logger.error(f"Unexpected error in thread {thread_index}: {str(e)}")
+                                    
+            if not self.stop_event.is_set():
+                with self.lock:
+                    self.task.part_states[thread_index] = True
+                    if all(self.task.part_states.values()):
+                        self._merge_files()
+                        
+        except requests.RequestException as e:
+            self.logger.error(f"Download error in thread {thread_index}: {str(e)}")
+            with self.lock:
+                if not self.stop_event.is_set():
+                    self.stop_event.set()
+                    self.task.update_status(DownloadStatus.ERROR, str(e))
         except Exception as e:
             self.logger.error(f"Thread {thread_index} error: {str(e)}")
             with self.lock:

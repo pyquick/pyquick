@@ -23,179 +23,283 @@ import datetime
 from bs4 import BeautifulSoup
 import sys
 import importlib
-import pip_manager  # 导入pip管理模块
-import settings.settings_manager as settings_manager  # 导入设置管理模块
-from downloader import Downloader, DownloadManager  # 导入下载器模块
+import json
+import gc
+import multiprocessing
+from multiprocessing import Process, Queue, Manager, Pool, Event
+from functools import partial
+from crashes import *
+version="1965"
+myfilenumber="7079"
+try:
+    collect.delete_crashes_folder_all(version)
+except Exception as e:
+    pass
+open.repair_path(version)#修复缓存路径
+config_path=create_folder.get_path("pyquick",version)
+cancel_event = threading.Event()
+create_folder.folder_create("pyquick",version)
+# 导入新的日志系统
+try:
+    from log import app_logger, download_logger, error_logger, configure_global_loggers
+    from log import file_manager, json_manager, configure_file_managers
+    
+    # 设置日志目录
+    log_dir = os.path.join(config_path, "log")
+    if not os.path.exists(log_dir):
+        os.makedirs(log_dir)
+    
+    # 配置日志系统
+    configure_global_loggers(log_level="info", enable_console=True, enable_file=True, log_dir=log_dir)
+    
+    # 配置文件管理器
+    configure_file_managers(base_dir=config_path)
+    
+    USE_NEW_LOG_SYSTEM = True
+except ImportError:
+    # 如果导入失败，使用原始日志配置
+    USE_NEW_LOG_SYSTEM = False
+    
+    # 确保日志目录存在
+    log_dir = os.path.join(config_path, "log")
+    if not os.path.exists(log_dir):
+        os.makedirs(log_dir)
 
 # 配置日志记录
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('pyquick.log'),
+            logging.FileHandler(os.path.join(log_dir, 'pyquick.log')),
         logging.StreamHandler()
     ]
 )
-logger = logging.getLogger('pyquick')
+app_logger = logging.getLogger('pyquick')
+download_logger = logging.getLogger('download')
+error_logger = logging.getLogger('error')
+
+# 导入设置和主题管理模块
+import settings.settings_manager as settings_manager
+from settings.settings_manager import init_manager, get_manager, init_theme_manager, get_theme_manager
+from downloader.DownloadManager import DownloadManager  # 导入下载管理器
+from downloader import Downloader  # 导入下载器模块
+from pipx.upgrade_pip import get_current_pip_version, get_latest_pip_version, upgrade_pip
+from pipx.install_unsi import install_package, uninstall_package
+
+# 添加一个兼容函数，以防其他模块调用init_settings_manager
+def init_settings_manager(config_path):
+    """兼容性函数，转发到init_manager"""
+    return init_manager(config_path)
+
+# 添加一个安全的UI更新函数
+def safe_ui_update(widget, **kwargs):
+    """安全地在主线程中更新UI元素"""
+    if widget and widget.winfo_exists():
+        try:
+            root.after(0, lambda: widget.config(**kwargs))
+            return True
+        except Exception as e:
+            error_logger.error(f"UI更新错误: {e},Line98(maybe),{myfilenumber},safe_ui_update")
+            return False
+    return False
+
+# 线程安全的Tkinter操作装饰器
+def tk_safe(func):
+    """确保Tkinter操作在主线程中执行的装饰器"""
+    def wrapper(*args, **kwargs):
+        if threading.current_thread() == threading.main_thread():
+            # 已在主线程，直接执行
+            return func(*args, **kwargs)
+        else:
+            # 不在主线程，使用after方法调度到主线程
+            result_queue = queue.Queue()
+            def task():
+                try:
+                    result = func(*args, **kwargs)
+                    result_queue.put((True, result))
+                except Exception as e:
+                    result_queue.put((False, e))
+            
+            try:
+                root.after(0, task)
+                # 等待执行结果
+                success, result = result_queue.get(timeout=5)
+                if success:
+                    return result
+                else:
+                    raise result
+            except Exception as e:
+                error_logger.error(f"Tkinter操作失败: {func.__name__}, {str(e)},Line128(maybe),{myfilenumber},tk_safe")
+                raise
+    
+    return wrapper
 
 # 全局线程池
-THREAD_POOL = ThreadPoolExecutor(max_workers=10, thread_name_prefix="PyquickWorker")
+THREAD_POOL = ThreadPoolExecutor(max_workers=min(4, os.cpu_count()), thread_name_prefix="PyquickWorker")
 # UI更新队列
 UI_UPDATE_QUEUE = queue.Queue()
 
-config_path=create_folder.get_path("pyquick","1965")
-cancel_event = threading.Event()
-create_folder.folder_create("pyquick","1965")
 
 # 全局变量
 download_manager = None  # 下载管理器实例
 current_task_id = None   # 当前下载任务ID
+pip_manager = None       # PIP管理器实例
+settings_mgr = None      # 设置管理器实例
+theme_mgr = None         # 主题管理器实例
 
-def install_package(package):
-    try:
-        importlib.import_module(package)
-    except ImportError:
-        try:
-            subprocess.check_call([sys.executable, "-m", "pip", "install", package])
-        except subprocess.CalledProcessError:
-            logging.error(f"Failed to install {package}")
-            return False
-    return True
+def log_start():
+    """记录程序启动信息"""
+    app_logger.info("="*50)
+    app_logger.info(f"PyQuick 启动于 {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    app_logger.info(f"操作系统: {sys.platform}, Python版本: {sys.version}")
+    app_logger.info(f"配置路径: {config_path}")
+    app_logger.info("="*50)
+
+# 启动日志
+log_start()
 
 # 自动安装依赖
 install_package("memory_profiler")
 from debug_info.ui import DebugInfoWindow
 # 排序版本获取结果
 def sort_results(results: list):
-    _results = results.copy()
-    length = len(_results)
-    for i in range(length):
-        for ii in range(0, length - i - 1):
-            v1 = Version(_results[ii])
-            v2 = Version(_results[ii + 1])
-            if v1 < v2:
-                _results[ii], _results[ii + 1] = _results[ii + 1], _results[ii]
-    version_combobox.configure(values=_results)
-    with open(os.path.join(config_path, "version.txt"), "w") as f:
-        f.write(str(_results))
+    """排序Python版本列表，最新版本排在前面"""
+    try:
+        # 使用Version类来排序
+        results_sorted = sorted(results, key=lambda x: Version(x), reverse=True)
+        return results_sorted
+    except Exception as e:
+        error_logger.error(f"排序版本列表失败: {e},Line168,{myfilenumber},sort_results")
+        return results
+
+def update_versions(results_sorted):
+    """更新版本下拉框中的版本列表"""
+    try:
+        if version_combobox and version_combobox.winfo_exists():
+            version_combobox.configure(values=results_sorted)
+            if results_sorted and len(results_sorted) > 0:
+                version_combobox.current(0)  # 选择最新版本
+        if version_reload and version_reload.winfo_exists():
+            version_reload.config(text="刷新版本列表", state="normal")
+    except Exception as e:
+        error_logger.error(f"更新版本列表失败: {e},Line181,{myfilenumber},update_versions")
+
+def handle_error(exception):
+    """处理版本列表加载错误"""
+    app_logger.error(f"Version reload error: {str(exception)}")
+    if version_reload and version_reload.winfo_exists():
+        version_reload.config(text="刷新失败", state="normal")
+        # 3秒后自动恢复按钮文本
+        root.after(3000, lambda: version_reload.config(text="刷新版本列表", state="normal"))
+
 def python_version_reload():
-    global is_reloading
+    """重新加载Python版本列表"""
     def thread():
-        global is_reloading
-        url = "https://www.python.org/ftp/python/"
-        is_reloading = True
-        version_reload.config(text="Reloading...", state="disabled")
-        
-        # 设置重试次数和延迟
-        max_retries = 3
-        retry_delay = 1
-        
-        for attempt in range(max_retries):
-            try:
-                # 配置requests会话
-                session = requests.Session()
-                session.verify = False
-                session.headers.update({
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-                })
-                
-                response = session.get(url, timeout=10)
-                response.raise_for_status()
-                
-                bs = BeautifulSoup(response.content, "lxml")
-                results = []
-                for i in bs.find_all("a"):
-                    if i.text[0].isnumeric():
-                        results.append(i.text[:-1])
-                        
-                if results:
-                    version_reload.config(text="Sorting...")
-                    is_reloading = False
-                    sort_results(results)
-                    version_reload.config(text="Reload", state="normal")
-                    break
+        try:
+            response = requests.get("https://www.python.org/ftp/python/", timeout=10)
+            response.raise_for_status()
+            
+            bs = BeautifulSoup(response.content, "lxml")
+            r1 = r'\d+\.\d+\.\d+/$'
+            results = []
+            for i in bs.find_all("a"):
+                # 使用正则匹配版本号格式
+                if re.match(r1, i.text):
+                    version = i.text.strip('/')
+                    results.append(version)
                     
-            except requests.exceptions.SSLError as e:
-                logging.error(f"SSL Error (attempt {attempt + 1}/{max_retries}): {e}")
-            except requests.exceptions.RequestException as e:
-                logging.error(f"Request Error (attempt {attempt + 1}/{max_retries}): {e}")
-            except Exception as e:
-                logging.error(f"Unexpected Error (attempt {attempt + 1}/{max_retries}): {e}")
-                
-            if attempt < max_retries - 1:
-                time.sleep(retry_delay)
-                retry_delay *= 2  # 指数退避
-            else:
-                version_reload.config(text="Reload failed", state="normal")
-                is_reloading = False
-                
+            # 排序结果
+            results_sorted = sort_results(results)
+            
+            # 保存最新结果到文件中
+            sav_path.save_path(config_path, "version.txt", "w", str(results_sorted))
+            
+            # 更新UI
+            root.after(0, lambda: update_versions(results_sorted))
+            
+            # 定期释放内存
+            gc.collect()
+        except Exception as e:
+            # 更新UI显示错误
+            root.after(0, lambda: handle_error(e))
+    
+    # 线程启动
     threading.Thread(target=thread, daemon=True).start()
+
+
+
 def python_file_reload():
-    r1 = r'\S+/'
-    stop_event = threading.Event()
-    
-    def thread():
-        session = requests.Session()
-        session.verify = False
-        session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        })
+    try:
+        ver=version_combobox.get()
+        response = requests.get(f"https://www.python.org/ftp/python/{ver}/", timeout=10)
+        response.raise_for_status()
         
-        while not stop_event.is_set():
-            ver1 = version_combobox.get()
-            if not ver1:
-                time.sleep(0.3)
-                continue
-                
-            url = f"https://www.python.org/ftp/python/{ver1}"
-            max_retries = 3
-            retry_delay = 1
-            
-            for attempt in range(max_retries):
-                try:
-                    response = session.get(url, timeout=10)
-                    response.raise_for_status()
-                    
-                    bs = BeautifulSoup(response.content, "lxml")
-                    results = []
-                    for i in bs.find_all("a"):
-                        if (re.match(r1, i.text) is None and 
-                            i.text[-1] != "/" and 
-                            ".exe" not in i.text and 
-                            "-embed-" not in i.text):
-                            results.append(i.text)
-                    
-                    ver2 = version_combobox.get()
-                    if ver1 == ver2:
-                        choose_file_combobox.configure(values=results)
-                    else:
-                        choose_file_combobox.configure(values=[])
-                    break
-                    
-                except requests.exceptions.SSLError as e:
-                    logging.error(f"SSL Error (attempt {attempt + 1}/{max_retries}): {e}")
-                except requests.exceptions.RequestException as e:
-                    logging.error(f"Request Error (attempt {attempt + 1}/{max_retries}): {e}")
-                except Exception as e:
-                    logging.error(f"Unexpected Error (attempt {attempt + 1}/{max_retries}): {e}")
-                
-                if attempt < max_retries - 1:
-                    time.sleep(retry_delay)
-                    retry_delay *= 2
-            
-            time.sleep(0.3)
+        bs = BeautifulSoup(response.content, "lxml")
+        r1 = r'python-\S+-macos\S+.pkg'
+        r2 = r'python-\S+-macos\S+.dmg'
+        r3 = r'python-\S+.tgz'
+        r4 = r'python-\S+.tar.xz'
+        r5 = r'python-\S+.json'
+        r6 = r'python-\S+.sig'
+        r7 = r'python-\S+.asc'
     
-    thread = threading.Thread(target=thread, daemon=True)
-    thread.start()
-    return stop_event  # 返回停止事件，以便在需要时停止线程
+        
+        results = []
+        for i in bs.find_all("a"):
+            # 使用正则匹配版本号格式
+            if (re.match(r1, i.text) or re.match(r2, i.text) or re.match(r3, i.text) or re.match(r4, i.text) or re.match(r5, i.text) or re.match(r6, i.text) or re.match(r7, i.text)) and "exe" not in i.text and "win" not in i.text and "embed" not in i.text:
+                packages = i.text.strip(" ")
+                results.append(packages)
+        return results
+    except Exception as e:
+        # 更新UI显示错误
+        return []
+def show_name():
+    while True:
+        try:
+            ver=version_combobox.get()
+            if os.path.exists(os.path.join(config_path,"crashes","download","ver.txt")):
+                ver1=edit.read_file(version,"download","ver.txt")
+                if ver1==ver:
+                    app_logger.info("版本号相同")
+                else:
+                    ver2=version_combobox.get()
+                    edit.edit_file(version,"download","ver.txt",ver2)
+                    app_logger.info("修改版本号")
+            else:
+                open.create_crashes_folder(version,"download")
+                open.create_crashes_file(version,"download","ver.txt")
+            a=python_file_reload()
+            choose_file_combobox.configure(values=a)
+            time.sleep(0.5)
+            gc.collect()
+        except Exception as e:
+            error_logger.error(f"显示python包失败: {str(e)},Line272,{myfilenumber}")
 def read_python_list():
-    base1=str(sav_path.read_path(config_path,"version.txt","readline"))
-    base2=base1.strip("[]").split(",")
-    base3=[]
-    for i in base2:
-        j=i.strip("'")
-        base3.append(j.strip(" '"))
-    version_combobox.configure(values=base3)
+    """读取Python版本列表"""
+    try:
+        base1 = str(sav_path.read_path(config_path, "version.txt", "readline"))
+        base2 = base1.strip("[]").split(",")
+        base3 = []
+        for i in base2:
+            j = i.strip("'")
+            base3.append(j.strip(" '"))
+        
+        # 通过root.after在主线程中更新UI
+        def update_ui():
+            try:
+                if version_combobox and version_combobox.winfo_exists():
+                    version_combobox.configure(values=base3)
+            except Exception as e:
+                error_logger.error(f"更新版本列表失败: {str(e)},Line289,{myfilenumber},update_versions")
+        
+        # 确保在主线程中执行UI更新
+        if threading.current_thread() == threading.main_thread():
+            update_ui()
+        else:
+            root.after(0, update_ui)
+    except Exception as e:
+        error_logger.error(f"读取Python版本列表失败: {str(e)},Line297,{myfilenumber},read_python_list")
 
 class Version:
     def __init__(self, version_str: str):
@@ -250,6 +354,7 @@ def select_destination():
     if destination_path:
         destination_entry.delete(0, tk.END)
         destination_entry.insert(0, destination_path)
+
 # 全局变量
 file_size = 0
 executor: ThreadPoolExecutor
@@ -267,6 +372,8 @@ def validate_path(path):
     返回:
     bool: 如果路径存在返回True，否则返回False
     """
+    if not path:
+        return False
     return os.path.isdir(path)
 def validate_version(version):
     """
@@ -292,102 +399,102 @@ def validate_version(version):
 def load_proxy_config():
     """加载代理配置"""
     try:
-        import json
-        proxy_config = sav_path.read_path(config_path, "proxy.json", "read")
-        if proxy_config:
-            return json.loads(proxy_config)
-    except:
-        pass
+        if USE_NEW_LOG_SYSTEM:
+            # 使用新的日志系统加载代理配置
+            proxy_config = json_manager.read_json(os.path.join(config_path, "proxy.json"))
+            if proxy_config:
+                app_logger.info(f"已加载代理配置: {proxy_config}")
+                return proxy_config
+        else:
+            # 使用旧的方式加载代理配置
+            proxy_config = sav_path.read_path(config_path, "proxy.json", "read")
+            if proxy_config:
+                return json.loads(proxy_config)
+    except Exception as e:
+        error_logger.error(f"加载代理配置出错: {e},Line409,{myfilenumber},load_proxy_config")
     return None
 
 def init_download_manager():
     """初始化下载管理器"""
     global download_manager
     if download_manager is None:
+        try:
         # 优化线程数配置
-        thread_count = min(max(2, int(threads_entry.get())), os.cpu_count() * 2)
-        download_manager = DownloadManager(
-            task_db_path=os.path.join(config_path, "downloads.json"),
-            max_concurrent_downloads=min(3, os.cpu_count()),
-            num_threads_per_download=thread_count,
-            on_task_status_changed=on_download_status_changed
-        )
-        logger.info(f"Download manager initialized with {thread_count} threads per download")
+            thread_count = min(max(2, int(threads_entry.get())), os.cpu_count() * 2)
+            download_manager = DownloadManager(
+                task_db_path=os.path.join(config_path, "downloads.json"),
+                max_concurrent_downloads=min(3, os.cpu_count()),
+                num_threads_per_download=thread_count,
+                on_task_status_changed=on_download_status_changed
+            )
+            app_logger.info(f"下载管理器初始化成功: 线程数={thread_count}")
+        except Exception as e:
+            error_logger.error(f"初始化下载管理器失败: {e},Line427,{myfilenumber},init_download_manager")
+            messagebox.showerror("错误", f"初始化下载管理器失败: {e},Line428,{myfilenumber},init_download_manager")
 
-def on_download_status_changed(task_id, status):
+def on_download_status_changed(task):
     """下载状态变化回调函数"""
-    if task_id == current_task_id:
+    if task.task_id == current_task_id:
         update_download_ui()
 
 def update_download_ui():
-    """更新下载UI"""
-    if not current_task_id:
-        return
+    """更新下载UI状态"""
+    global file_size, downloaded_bytes
 
-    # 使用UI更新队列来处理界面更新
-    try:
-        task = download_manager.get_task(current_task_id)
-        if not task:
+    if not is_downloading:
             return
 
-        UI_UPDATE_QUEUE.put({
-            'task': task,
-            'status': task.status,
-            'progress': task.progress,
-            'speed': task.speed,
-            'total_size': task.total_size,
-            'downloaded_size': task.downloaded_size,
-            'error': task.error if hasattr(task, 'error') else None
-        })
-        
-        # 使用after方法在主线程中处理UI更新
-        root.after(1, process_ui_updates)
-    except Exception as e:
-        logger.error(f"Error updating UI: {str(e)}")
-
-def process_ui_updates():
-    """处理UI更新队列"""
     try:
-        while not UI_UPDATE_QUEUE.empty():
-            update = UI_UPDATE_QUEUE.get_nowait()
-            task = update['task']
+        # 使用锁确保线程安全
+        with lock:
+            downloaded = sum(downloaded_bytes)
+            percent = int(downloaded / file_size * 100) if file_size > 0 else 0
+            size_str = f"{downloaded / 1024 / 1024:.2f} MB / {file_size / 1024 / 1024:.2f} MB"
+        
+        # 计算下载速度
+        current_time = time.time()
+        if not hasattr(update_download_ui, "last_update_time"):
+            update_download_ui.last_update_time = current_time
+            update_download_ui.last_downloaded = downloaded
+            speed = 0
+        else:
+            time_diff = current_time - update_download_ui.last_update_time
+            if time_diff > 0:
+                bytes_diff = downloaded - update_download_ui.last_downloaded
+                speed = bytes_diff / time_diff
+                update_download_ui.last_update_time = current_time
+                update_download_ui.last_downloaded = downloaded
+            else:
+                speed = 0
+        
+        # 格式化下载速度
+        speed_str = f"{speed / 1024 / 1024:.2f} MB/s" if speed > 0 else ""
+        
+        # 更新进度条和标签
+        if download_pb and download_pb.winfo_exists():
+            download_pb['value'] = percent
+        if size_label and size_label.winfo_exists():
+            size_label.config(text=size_str)
+        if speed_label and speed_label.winfo_exists():
+            speed_label.config(text=speed_str)
+        
+        # 当新的进度信息已经显示，计划下一次更新
+        if is_downloading:
+            # 降低更新频率，减少CPU使用
+            update_interval = 500  # 毫秒
+            root.after(update_interval, update_download_ui)
             
-            # 更新进度条
-            if update['status'] == 'downloading':
-                download_pb['value'] = update['progress']
-                speed_kb = update['speed'] / 1024
-                speed_text = f"{speed_kb:.2f} KB/s" if speed_kb < 1024 else f"{speed_kb / 1024:.2f} MB/s"
-                
-                remaining_mb = (update['total_size'] - update['downloaded_size']) / (1024 * 1024)
-                eta = task.get_eta() if hasattr(task, 'get_eta') else 0
-                eta_text = f"ETA: {eta:.0f}s" if eta else ""
-                
-                status_text = f"Downloading: {update['progress']:.1f}% ({speed_text}) - {remaining_mb:.1f}MB remaining {eta_text}"
-                status_label.config(text=status_text)
-                
-                update_button_states(True, False, True)
-                
-            elif update['status'] == 'paused':
-                status_label.config(text="Download paused")
-                update_button_states(False, True, True)
-                
-            elif update['status'] == 'completed':
-                download_pb['value'] = 100
-                status_label.config(text="Download completed successfully")
-                update_button_states(True, False, False)
-                
-            elif update['status'] in ['cancelled', 'error']:
-                download_pb['value'] = 0
-                error_text = f"Download failed: {update['error']}" if update['status'] == 'error' else "Download cancelled by user"
-                status_label.config(text=error_text)
-                update_button_states(True, False, False)
-                
+            # 定期释放内存
+            if not hasattr(update_download_ui, "gc_counter"):
+                update_download_ui.gc_counter = 0
+            update_download_ui.gc_counter += 1
+            if update_download_ui.gc_counter >= 10:  # 每10次更新释放一次内存
+                update_download_ui.gc_counter = 0
+                gc.collect()
     except Exception as e:
-        logger.error(f"Error processing UI updates: {str(e)}")
-    finally:
-        # 继续处理队列中的更新
-        if not UI_UPDATE_QUEUE.empty():
-            root.after(1, process_ui_updates)
+        error_logger.error(f"更新下载UI失败: {e},Line490,{myfilenumber},update_download_ui")
+        if is_downloading:
+            root.after(1000, update_download_ui)
 
 def update_button_states(can_download: bool, can_resume: bool, can_cancel: bool):
     """更新按钮状态"""
@@ -401,20 +508,30 @@ def update_task_progress():
     try:
         if download_manager and current_task_id:
             task = download_manager.get_task(current_task_id)
-            if task and task.status == 'downloading':
+            if task and hasattr(task, 'status') and 'downloading' in str(task.status).lower():
+                # 使用安全的进度更新
                 update_download_ui()
                 
+        # 获取当前进度值，确保它是数字
+        try:
+            progress = float(download_pb['value']) if 'value' in download_pb else 0
+        except (ValueError, TypeError, AttributeError):
+            progress = 0
+            
         # 动态调整刷新间隔
-        progress = download_pb['value']
-        refresh_interval = min(
-            2000 if progress > 95 else  # 接近完成时大幅降低刷新频率
-            1000 if progress > 80 else  # 高进度时降低刷新频率
-            500,                        # 正常刷新频率
-        )
+        if progress > 95:
+            refresh_interval = 2000  # 接近完成时显著减少刷新频率
+        elif progress > 80:
+            refresh_interval = 1000  # 高进度时减少刷新频率
+        else:
+            refresh_interval = 500   # 正常刷新频率
+        
+        # 安排下一次更新
         root.after(refresh_interval, update_task_progress)
+        
     except Exception as e:
-        logger.error(f"Error in task progress update: {str(e)}")
-        root.after(1000, update_task_progress)  # 发生错误时使用较长的刷新间隔
+        error_logger.error(f"任务进度更新错误: {str(e)},Line528,{myfilenumber},update_task_progress")
+        root.after(1000, update_task_progress)  # 出错时使用较长的刷新间隔
 
 def validate_download_config():
     """验证下载配置是否有效"""
@@ -426,7 +543,7 @@ def validate_download_config():
     # 初始化时默认禁用下载按钮
     download_button.config(state="disabled")
     
-    # 收集所有错误信息
+    # 收集所有错误消息
     errors = []
     
     # 验证版本选择
@@ -434,8 +551,10 @@ def validate_download_config():
         errors.append("请选择Python版本！")
     
     # 验证目标路径
-    if not destination_path or not os.path.exists(destination_path):
-        errors.append("路径无效！")
+    if not destination_path:
+        errors.append("请选择目标路径！")
+    elif not os.path.exists(destination_path):
+        errors.append(f"路径无效: {destination_path}")
     
     # 验证文件选择
     if not file_name:
@@ -449,17 +568,18 @@ def validate_download_config():
     except (ValueError, TypeError):
         errors.append("无效的线程数！")
     
-    # 如果有错误，显示所有错误信息
+    # 如果有错误，显示所有错误消息
     if errors:
-        status_label.config(text="\n".join(errors), style="Error.TLabel", foreground="red")
+        status_label.config(text="\n".join(errors), foreground="red")
         return False
     
-    # 所有验证通过才启用下载按钮
+    # 只有所有验证都通过才启用下载按钮
     download_button.config(state="normal")
+    status_label.config(foreground="black")
     return True
 
 def download_selected_version():
-    """开始下载选定的Python版本"""
+    """开始下载所选Python版本"""
     global current_task_id
     
     # 验证下载配置
@@ -469,252 +589,791 @@ def download_selected_version():
     selected_version = version_combobox.get()
     destination_path = destination_entry.get()
     file_name = choose_file_combobox.get()
+    thread_count = int(threads_entry.get())
+    
+    # 准备保存路径
+    save_path = os.path.join(destination_path, file_name)
+    
+    # 检查文件是否已存在
+    if os.path.exists(save_path):
+        if messagebox.askyesno("文件已存在", f"文件 {file_name} 已存在。\n是否覆盖？"):
+            try:
+                os.remove(save_path)
+            except Exception as e:
+                error_logger.error(f"删除已存在文件失败: {e}")
+                messagebox.showerror("错误", f"无法删除已存在的文件: {e}")
+                return
+        else:
+            return
     
     # 初始化下载管理器
     init_download_manager()
     
     # 构建下载URL和文件保存路径
     url = f"https://www.python.org/ftp/python/{selected_version}/{file_name}"
-    save_path = os.path.join(destination_path, file_name)
     
-    from downloader import download_manager
+    # 获取代理设置
+    proxies = load_proxy_config()
+    
+    app_logger.info(f"开始下载: URL={url}, 保存路径={save_path}, 线程数={thread_count}")
+    
     # 创建下载任务
-    current_task_id = download_manager.add_task(
+    try:
+        current_task_id = download_manager.add_task(
         url=url,
-        file_path=destination_path,
-        thread_count=4,
-        proxies=None
-    )
+            file_path=save_path,
+            thread_count=thread_count,
+            proxies=proxies
+        )
+        
+        # 开始下载
+        download_manager.start_task(current_task_id)
+        
+        # 更新UI
+        download_pb['value'] = 0
+        status_label.config(text="准备下载...")
+        update_button_states(False, False, True)
+        
+        # 立即进行一次UI更新
+        update_download_ui()
     
-    # 更新UI
-    update_download_ui()
+    except Exception as e:
+        error_logger.error(f"创建下载任务失败: {e},Line636,{myfilenumber},download_selected_version")
+        messagebox.showerror("下载错误", f"创建下载任务失败: {e}")
+        download_pb['value'] = 0
+        status_label.config(text=f"下载失败: {e}")
+        update_button_states(True, False, False)
 
 def cancel_download():
     """取消下载"""
     global current_task_id
-    if current_task_id:
-        download_manager.cancel_task(current_task_id)
-        update_download_ui()
+    if current_task_id and download_manager:
+        try:
+            download_manager.cancel_task(current_task_id)
+            app_logger.info(f"用户取消下载: task_id={current_task_id}")
+            update_download_ui()
+        except Exception as e:
+            error_logger.error(f"取消下载失败: {e},Line651,{myfilenumber},cancel_download")
+            messagebox.showerror("错误", f"取消下载失败: {e}")
 
 def resume_download():
     """恢复下载"""
     global current_task_id
-    if current_task_id:
-        download_manager.resume_task(current_task_id)
-        update_download_ui()
+    if current_task_id and download_manager:
+        try:
+            download_manager.resume_task(current_task_id)
+            app_logger.info(f"用户恢复下载: task_id={current_task_id}")
+            update_download_ui()
+        except Exception as e:
+            error_logger.error(f"恢复下载失败: {e},Line663,{myfilenumber},resume_download")
+            messagebox.showerror("错误", f"恢复下载失败: {e}")
 
 def pause_download():
     """暂停下载"""
     global current_task_id
-    if current_task_id:
-        download_manager.pause_task(current_task_id)
-        update_download_ui()
+    if current_task_id and download_manager:
+        try:
+            download_manager.pause_task(current_task_id)
+            app_logger.info(f"用户暂停下载: task_id={current_task_id}")
+            update_download_ui()
+        except Exception as e:
+            error_logger.error(f"暂停下载失败: {e},Line675,{myfilenumber},pause_download")
+            messagebox.showerror("错误", f"暂停下载失败: {e}")
 
 def show_about():
-    time_lim=(datetime.datetime(2025,5,2)-datetime.datetime.now()).days
-    if (datetime.datetime.now()>=datetime.datetime(2025,4,1)):
-        messagebox.showwarning("About", f"Version: dev\nBuild: 1962\n{time_lim} days left.")
-    else:
-        messagebox.showinfo("About", f"Version: dev\nBuild: 1962\n{time_lim} days left.")
+    messagebox.showinfo("About", f"Version: dev\nBuild: 1962\n10086 days left.")
 
 def on_closing():
-    global is_downloading
-    if is_downloading:
-        cancel_download()
-    settings_manager.save_theme()  # 使用settings_manager中的函数
-    root.destroy()
-    exit(0)
-    subprocess.Popen("killall Python",text=True,shell=True)
-    subprocess.Popen("killall pyquick",text=True,shell=True)
-    subprocess.Popen("killall Pyquick",text=True,shell=True)
+    try:
+        global is_downloading, file_reload_stop_event
+        if is_downloading:
+            cancel_download()
+        
+        # 停止文件刷新线程并终止进程
+        if 'file_reload_stop_event' in globals() and file_reload_stop_event:
+            try:
+                if isinstance(file_reload_stop_event, dict):
+                    file_reload_stop_event["stop_event"].set()
+                    if "process" in file_reload_stop_event:
+                        file_reload_stop_event["process"].terminate()
+                else:
+                    file_reload_stop_event.set()
+            except Exception as e:
+                error_logger.error(f"停止文件刷新线程失败: {e},Line696,{myfilenumber},on_closing")
+            
+        # 如果主题管理器存在，保存当前主题设置
+        if settings_mgr:
+            try:
+                settings_mgr.save_settings()
+                app_logger.info("设置已保存")
+            except Exception as e:
+                error_logger.error(f"保存设置失败: {e},Line704,{myfilenumber},on_closing")
+        
+        # 确保所有线程都有机会终止
+        time.sleep(0.1)
+        try:
+            collect.delete_crashes_folder_all(version)
+        except Exception as e:
+            error_logger.error(f"删除缓存文件夹失败: {e},Line712,{myfilenumber},on_closing")
+        root.destroy()
+        exit(0)
+    except Exception as e:
+        subprocess.Popen("killall Python",text=True,shell=True)
+        subprocess.Popen("killall pyquick",text=True,shell=True)
+        subprocess.Popen("killall Pyquick",text=True,shell=True)
 
+def update_pip_ui(result, operation, package_name=None):
+    """Update UI state after pip operation"""
+    if result:
+        if operation == "upgrade":
+            message = "pip升级成功"
+        elif operation == "install":
+            message = f"包 {package_name} 安装成功"
+        elif operation == "uninstall":
+            message = f"包 {package_name} 卸载成功"
+        UI_UPDATE_QUEUE.put(lambda: messagebox.showinfo("成功", message))
+    else:
+        if operation == "upgrade":
+            message = "pip升级失败"
+        elif operation == "install":
+            message = f"包 {package_name} 安装失败"
+        elif operation == "uninstall":
+            message = f"包 {package_name} 卸载失败"
+        UI_UPDATE_QUEUE.put(lambda: messagebox.showerror("错误", message))
+    UI_UPDATE_QUEUE.put(lambda: clear_a())
 
+def pip_upgrade_wrapper():
+    """Wrapper for pip upgrade operation, add UI update"""
+    def upgrade_thread():
+        result = upgrade_pip()
+        update_pip_ui(result, "upgrade")
+    threading.Thread(target=upgrade_thread, daemon=True).start()
 
+def pip_install_wrapper(package_name):
+    """Wrapper for package installation operation, add UI update"""
+    def install_thread():
+        result = install_package(package_name)
+        update_pip_ui(result, "install", package_name)
+    threading.Thread(target=install_thread, daemon=True).start()
 
+def pip_uninstall_wrapper(package_name):
+    """Wrapper for package uninstallation operation, add UI update"""
+    def uninstall_thread():
+        result = uninstall_package(package_name)
+        update_pip_ui(result, "uninstall", package_name)
+    threading.Thread(target=uninstall_thread, daemon=True).start()
 
+def init_pip_manager():
+    """初始化pip_manager"""
+    global pip_manager, settings_tab
+    
+    if HAS_PIP_MANAGER:
+        # 使用新的PipManager类
+        pip_manager = PipManager(root, settings_tab, config_path)
+    else:
+        # 使用旧的方式
+        package_label = ttk.Label(settings_tab, text="Enter Package Name:")
+        package_label.grid(row=1, column=0, pady=20, padx=20)
 
+        package_entry = ttk.Entry(settings_tab, width=60)
+        package_entry.grid(row=1, column=1, pady=20, padx=20)
 
+        install_button = ttk.Button(settings_tab, text="Install Package", 
+                                command=lambda: pip_install_wrapper(package_entry.get()))
+        install_button.grid(row=2, column=0, columnspan=3, pady=20, padx=20)
 
+        uninstall_button = ttk.Button(settings_tab, text="Uninstall Package", 
+                                    command=lambda: pip_uninstall_wrapper(package_entry.get()))
+        uninstall_button.grid(row=3, column=0, columnspan=3, pady=20, padx=20)
 
+        pip_upgrade_button = ttk.Button(settings_tab, text="Upgrade Pip", command=pip_upgrade_wrapper)
+        pip_upgrade_button.grid(row=0, column=0, columnspan=3, pady=20, padx=20)
 
+# 在合适的位置添加PIP管理器的导入
+try:
+    from pipx.pip_manager import PipManager
+    HAS_PIP_MANAGER = True
+except ImportError:
+    HAS_PIP_MANAGER = False
+
+def init_settings():
+    """初始化设置管理器和主题管理器"""
+    global settings_mgr, theme_mgr
+    try:
+        # 初始化设置管理器
+        settings_mgr = init_manager(config_path)
+        app_logger.info("设置管理器初始化成功")
+        
+        # 初始化主题管理器
+        # 确保themes目录存在
+        themes_dir = os.path.join(os.path.dirname(__file__), "themes")
+        if not os.path.exists(themes_dir):
+            os.makedirs(themes_dir, exist_ok=True)
+            app_logger.info(f"创建主题目录: {themes_dir}")
+        
+        # 检查是否存在主题文件，如果不存在则创建默认主题
+        theme_files = {
+            "theme_config.json": {
+                "theme_type": "dark",
+                "allow_custom_themes": True,
+                "current_theme": "系统默认"
+            },
+            "light.json": {
+                "name": "亮色主题",
+                "type": "light",
+                "description": "默认亮色主题",
+                "colors": {
+                    "background": "#ffffff",
+                    "foreground": "#000000",
+                    "accent": "#0078d7",
+                    "text": "#333333",
+                    "button.background": "#f0f0f0",
+                    "button.foreground": "#000000",
+                    "entry.background": "#ffffff",
+                    "entry.foreground": "#000000",
+                    "label.foreground": "#333333"
+                }
+            },
+            "dark.json": {
+                "name": "暗色主题",
+                "type": "dark",
+                "description": "默认暗色主题",
+                "colors": {
+                    "background": "#1e1e1e",
+                    "foreground": "#ffffff",
+                    "accent": "#0078d7",
+                    "text": "#e0e0e0",
+                    "button.background": "#333333",
+                    "button.foreground": "#ffffff",
+                    "entry.background": "#252525",
+                    "entry.foreground": "#ffffff",
+                    "label.foreground": "#e0e0e0"
+                }
+            }
+        }
+        
+        for theme_file, theme_data in theme_files.items():
+            theme_path = os.path.join(themes_dir, theme_file)
+            if not os.path.exists(theme_path):
+                try:
+                    with open(theme_path, 'w', encoding='utf-8') as f:
+                        json.dump(theme_data, f, indent=4, ensure_ascii=False)
+                    app_logger.info(f"创建默认主题文件: {theme_path}")
+                except Exception as e:
+                    app_logger.error(f"创建主题文件失败: {theme_path}, {e},Line853,{myfilenumber},init_settings")
+        
+        try:
+            theme_mgr = init_theme_manager(themes_dir)
+            app_logger.info("主题管理器初始化成功")
+        except Exception as e:
+            error_logger.error(f"主题管理器初始化失败: {e},Line859,{myfilenumber},init_settings")
+            # 创建一个空的主题管理器，防止程序崩溃
+            theme_mgr = None
+        
+        return True
+    except Exception as e:
+        error_logger.error(f"初始化设置管理器失败: {e},Line865,{myfilenumber},init_settings")
+        return False
+
+def show_settings():
+    """打开设置窗口"""
+    global settings_mgr, theme_mgr, root
+    
+    try:
+        # 确保设置管理器已初始化
+        if settings_mgr is None:
+            if not init_settings():
+                messagebox.showerror("错误", "无法初始化设置管理器")
+                return
+        
+        # 使用设置模块中的函数打开设置窗口
+        from settings.ui.window import SettingsWindow
+        settings_window = SettingsWindow(root, settings_mgr, theme_mgr)
+        
+        app_logger.info("已打开设置窗口")
+    except Exception as e:
+        error_logger.error(f"打开设置窗口失败: {e},Line885,{myfilenumber},show_settings")
+        messagebox.showerror("错误", f"打开设置窗口失败: {e},Line886,{myfilenumber},show_settings")
+
+def apply_theme():
+    """应用当前主题到界面"""
+    global theme_mgr, root
+    
+    try:
+        # 如果主题管理器不可用，使用默认的sv_ttk主题
+        if theme_mgr is None:
+            try:
+                import sv_ttk
+                import darkdetect
+                
+                # 默认使用系统设置或light主题
+                theme = "light"  # 设置默认为light主题
+                try:
+                    # 检测系统主题
+                    if darkdetect.isDark():
+                        theme = "dark"
+                    else:
+                        theme = "light"
+                except:
+                    pass  # 如果无法检测，使用默认light主题
+                
+                # 从设置中读取主题（如果有）
+                if settings_mgr:
+                    user_theme = settings_mgr.get("theme.current_theme", "系统默认")
+                    if user_theme == "暗色主题" or user_theme == "dark":
+                        theme = "dark"
+                    elif user_theme == "亮色主题" or user_theme == "light":
+                        theme = "light"
+                    elif user_theme == "系统默认":
+                        # 已经在上面设置了基于系统的默认值
+                        pass
+                
+                sv_ttk.set_theme(theme)
+                app_logger.info(f"应用程序样式初始化: 使用{theme}主题")
+            except Exception as e:
+                error_logger.error(f"应用默认主题失败: {e},Line924,{myfilenumber},apply_theme")
+            return
+        
+        # 使用主题管理器
+        # 获取当前主题
+        theme_name = settings_mgr.get("theme.current_theme", "系统默认")
+        theme_type = "light"  # 默认使用亮色主题
+        
+        if theme_name == "暗色主题":
+            theme_type = "dark"
+        elif theme_name == "亮色主题":
+            theme_type = "light"
+        elif theme_name == "系统默认":
+            # 自动检测系统主题
+            try:
+                import darkdetect
+                theme_type = "dark" if darkdetect.isDark() else "light"
+            except ImportError:
+                theme_type = "light"  # 无法检测时默认使用亮色主题
+        
+        # 应用主题
+        try:
+            import sv_ttk
+            sv_ttk.set_theme(theme_type)
+            app_logger.info(f"已应用sv_ttk主题: {theme_type}")
+        except Exception as e:
+            error_logger.error(f"应用sv_ttk主题失败: {e},Line950,{myfilenumber},apply_theme")
+        
+        # 应用自定义主题设置（如果有）
+        try:
+            theme_mgr.apply_theme(root)
+            app_logger.info("已应用主题到主界面")
+        except Exception as e:
+            error_logger.error(f"应用主题到主界面失败: {e},Line957,{myfilenumber},apply_theme")
+            
+    except Exception as e:
+        error_logger.error(f"应用主题失败: {e},Line960,{myfilenumber},apply_theme")
 
 #GUI
 if __name__ == "__main__" and block_features.block_start():
-    #启动laugh = True
-    if(datetime.datetime.now()>=datetime.datetime(2025,9,2)):
-        messagebox.showerror("Error","You can not open python_tool:exitcode(0x1)")
-        exit(1)
-    elif(datetime.datetime.now()>=datetime.datetime(2025,8,1)):
-        messagebox.showwarning("up","Will cannot open on 2025,5.2")
+    try:
+        # 初始化日志记录
+        log_start()
+        
+        # 初始化设置管理器和主题管理器
+        init_settings()
+        
+        # 创建主窗口
+        root = tk.Tk()
+        root.title("Pyquick")
+        root.protocol("WM_DELETE_WINDOW", on_closing)
     
-    root = tk.Tk()
-    root.title("Pyquick")
-    root.protocol("WM_DELETE_WINDOW", on_closing)
-    menu_bar = tk.Menu(root)
-    root.config(menu=menu_bar)
-    help_menu = tk.Menu(menu_bar, tearoff=0)
-    settings_menu = tk.Menu(menu_bar, tearoff=0)
-    menu_bar.add_cascade(label="Settings", menu=settings_menu)
-    settings_menu.add_command(label="Settings", command=settings_manager.open_settings)  # 使用settings_manager中的函数
-    menu_bar.add_cascade(label="Help", menu=help_menu)
-    help_menu.add_command(label="About", command=show_about)
-    help_menu.add_separator()
+        # 设置图标 (Removed icon setting)
 
-    #TAB CONTROL
-    tab_control = ttk.Notebook(root)
-    #MODE TAB
-    fmode = ttk.Frame(root, padding="20")
-    tab_control.add(fmode,text="Python Download")
-    tab_control.grid(row=0, padx=10, pady=10)
+        # 应用主题
+        apply_theme()
+        
+        # 初始化并启动文件刷新线程
+        file_reload_stop_event = python_file_reload()
 
-    fsettings=ttk.Frame(root,padding="20")
-    tab_control.add(fsettings,text="Pip")
-    tab_control.grid(row=0, padx=10, pady=10)
+        # 创建菜单栏
+        menu_bar = tk.Menu(root)
+        root.config(menu=menu_bar)
+        help_menu = tk.Menu(menu_bar, tearoff=0)
+        settings_menu = tk.Menu(menu_bar, tearoff=0)
+        menu_bar.add_cascade(label="设置", menu=settings_menu)
+        settings_menu.add_command(label="应用设置", command=show_settings)
+        menu_bar.add_cascade(label="帮助", menu=help_menu)
+        help_menu.add_command(label="关于", command=show_about)
+        help_menu.add_command(label="调试信息", command=lambda: DebugInfoWindow())
+        help_menu.add_separator()
 
-    # 创建主下载界面框架
-    main_frame = ttk.Frame(fmode)
-    main_frame.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
+        #TAB CONTROL
+        tab_control = ttk.Notebook(root)
+        #MODE TAB
+        fmode = ttk.Frame(root, padding="20")
+        tab_control.add(fmode, text="Python下载")
+        tab_control.grid(row=0, padx=10, pady=10)
 
-    settings_tab=ttk.Frame(fsettings)
-    settings_tab.grid(row=1, column=0, padx=20, pady=20, sticky="nsew")
+        fsettings=ttk.Frame(root, padding="20")
+        tab_control.add(fsettings, text="Pip管理")
+        tab_control.grid(row=0, padx=10, pady=10)
 
-    # 版本选择模块
-    version_frame = ttk.LabelFrame(main_frame, text="Version Selection", padding=10)
-    version_frame.grid(row=0, column=0, padx=5, pady=5, sticky="ew")
+        # 创建主下载界面框架
+        root.grid_rowconfigure(0, weight=1)
+        root.grid_columnconfigure(0, weight=1)
+        
+        main_frame = ttk.Frame(fmode)
+        main_frame.grid(row=0, column=0, padx=10, pady=10, sticky='nsew')
+        main_frame.grid_columnconfigure(0, weight=1)
+        main_frame.grid_rowconfigure(0, weight=1)
 
-    version_label = ttk.Label(version_frame, text="Python Version:")
-    version_label.grid(row=0, column=0, pady=5, padx=5)
+        settings_tab=ttk.Frame(fsettings)
+        settings_tab.grid(row=1, column=0, padx=20, pady=20, sticky="nsew")
+        settings_tab.grid_columnconfigure(0, weight=1)
+        settings_tab.grid_rowconfigure(0, weight=1)
 
-    selected_version = tk.StringVar()
-    version_combobox = ttk.Combobox(version_frame, textvariable=selected_version, values=[], state="read", width=30)
-    version_combobox.grid(row=0, column=1, pady=5, padx=5)
+        # 版本选择模块
+        version_frame = ttk.LabelFrame(main_frame, text="版本选择", padding=10)
+        version_frame.grid(row=0, column=0, padx=5, pady=5, sticky="ew")
 
-    version_reload = ttk.Button(version_frame, text="Reload Versions", command=python_version_reload)
-    version_reload.grid(row=0, column=2, pady=5, padx=5)
+        version_label = ttk.Label(version_frame, text="Python版本:")
+        version_label.grid(row=0, column=0, pady=5, padx=5)
 
-    # 文件选择模块
-    file_frame = ttk.LabelFrame(main_frame, text="File Selection", padding=10)
-    file_frame.grid(row=1, column=0, padx=5, pady=5, sticky="ew")
+        selected_version = tk.StringVar()
+        version_combobox = ttk.Combobox(version_frame, textvariable=selected_version, values=[], state="readonly", width=30)
+        version_combobox.grid(row=0, column=1, pady=5, padx=5)
 
-    choose_label = ttk.Label(file_frame, text="Python Package:")
-    choose_label.grid(row=0, column=0, pady=5, padx=5)
+        version_reload = ttk.Button(version_frame, text="刷新版本列表", command=python_version_reload)
+        version_reload.grid(row=0, column=2, pady=5, padx=5)
 
-    choose_file = tk.StringVar()
-    choose_file_combobox = ttk.Combobox(file_frame, textvariable=choose_file, values=[], state="readonly", width=50)
-    choose_file_combobox.grid(row=0, column=1, columnspan=2, pady=5, padx=5)
+        # 文件选择模块
+        file_frame = ttk.LabelFrame(main_frame, text="文件选择", padding=10)
+        file_frame.grid(row=1, column=0, padx=5, pady=5, sticky="ew")
 
-    # 下载设置模块
-    settings_frame = ttk.LabelFrame(main_frame, text="Download Settings", padding=10)
-    settings_frame.grid(row=2, column=0, padx=5, pady=5, sticky="ew")
+        choose_label = ttk.Label(file_frame, text="Python安装包:")
+        choose_label.grid(row=0, column=0, pady=5, padx=5)
 
-    destination_label = ttk.Label(settings_frame, text="Save Location:")
-    destination_label.grid(row=0, column=0, pady=5, padx=5)
+        choose_file = tk.StringVar()
+        choose_file_combobox = ttk.Combobox(file_frame, textvariable=choose_file, values=[], state="readonly", width=50)
+        choose_file_combobox.grid(row=0, column=1, columnspan=2, pady=5, padx=5)
 
-    destination_entry = ttk.Entry(settings_frame, width=50)
-    destination_entry.grid(row=0, column=1, pady=5, padx=5)
+        # 下载设置模块
+        settings_frame = ttk.LabelFrame(main_frame, text="下载设置", padding=10)
+        settings_frame.grid(row=2, column=0, padx=5, pady=5, sticky="ew")
 
-    select_button = ttk.Button(settings_frame, text="Browse", command=select_destination)
-    select_button.grid(row=0, column=2, pady=5, padx=5)
+        destination_label = ttk.Label(settings_frame, text="保存位置:")
+        destination_label.grid(row=0, column=0, pady=5, padx=5)
 
-    threads_label = ttk.Label(settings_frame, text="Threads:")
-    threads_label.grid(row=1, column=0, pady=5, padx=5)
+        destination_entry = ttk.Entry(settings_frame, width=50)
+        destination_entry.grid(row=0, column=1, pady=5, padx=5)
 
-    threads = tk.IntVar()
-    threads_entry = ttk.Combobox(settings_frame, width=10, textvariable=threads, values=[str(i) for i in range(1, 129)], state="readonly")
-    threads_entry.grid(row=1, column=1, sticky="w", pady=5, padx=5)
-    threads_entry.current(7)
+        select_button = ttk.Button(settings_frame, text="浏览", command=select_destination)
+        select_button.grid(row=0, column=2, pady=5, padx=5)
 
-    # 下载控制模块
-    control_frame = ttk.LabelFrame(main_frame, text="Download Control", padding=10)
-    control_frame.grid(row=3, column=0, padx=5, pady=5, sticky="ew")
+        threads_label = ttk.Label(settings_frame, text="线程数:")
+        threads_label.grid(row=1, column=0, pady=5, padx=5)
 
-    button_frame = ttk.Frame(control_frame)
-    button_frame.grid(row=0, column=0, sticky="w")
+        threads = tk.IntVar()
+        threads_entry = ttk.Combobox(settings_frame, width=10, textvariable=threads, values=[str(i) for i in range(1, 17)], state="readonly")
+        threads_entry.grid(row=1, column=1, sticky="w", pady=5, padx=5)
+        threads_entry.current(3)  # 默认4线程
 
-    download_button = ttk.Button(button_frame, text="Download", command=download_selected_version)
-    download_button.grid(row=0, column=0, padx=5)
+        # 线程数说明
+        threads_tip = ttk.Label(settings_frame, text="推荐值: 2-8线程，过多可能导致连接问题", font=("", 8), foreground="grey")
+        threads_tip.grid(row=1, column=1, sticky="e", pady=5, padx=5)
 
-    pause_button = ttk.Button(button_frame, text="Pause", command=pause_download, state="disabled")
-    pause_button.grid(row=0, column=1, padx=5)
+        # 下载控制模块
+        control_frame = ttk.LabelFrame(main_frame, text="下载控制", padding=10)
+        control_frame.grid(row=3, column=0, padx=5, pady=5, sticky="ew")
 
-    resume_button = ttk.Button(button_frame, text="Resume", command=resume_download, state="disabled")
-    resume_button.grid(row=0, column=2, padx=5)
+        button_frame = ttk.Frame(control_frame)
+        button_frame.grid(row=0, column=0, sticky="w")
 
-    cancel_download_button = ttk.Button(button_frame, text="Cancel", command=cancel_download)
-    cancel_download_button.grid(row=0, column=3, padx=5)
+        download_button = ttk.Button(button_frame, text="下载", command=download_selected_version)
+        download_button.grid(row=0, column=0, padx=5)
 
-    # 进度显示模块
-    progress_frame = ttk.LabelFrame(main_frame, text="Download Progress", padding=10)
-    progress_frame.grid(row=4, column=0, sticky="ew", padx=5, pady=5)
+        pause_button = ttk.Button(button_frame, text="暂停", command=pause_download, state="disabled")
+        pause_button.grid(row=0, column=1, padx=5)
 
-    download_pb = ttk.Progressbar(progress_frame, orient="horizontal", mode="determinate", length=280)
-    download_pb.grid(row=0, column=0, columnspan=3, padx=5, pady=5)
+        resume_button = ttk.Button(button_frame, text="恢复", command=resume_download, state="disabled")
+        resume_button.grid(row=0, column=2, padx=5)
 
-    status_label = ttk.Label(progress_frame, text="", padding=5)
-    status_label.grid(row=1, column=0, sticky="ew", padx=5, pady=5)
+        cancel_download_button = ttk.Button(button_frame, text="取消", command=cancel_download, state="disabled")
+        cancel_download_button.grid(row=0, column=3, padx=5)
 
-    main_frame.grid_rowconfigure(0, weight=1)
-    main_frame.grid_columnconfigure(0, weight=1)
+        # 进度显示模块
+        progress_frame = ttk.LabelFrame(main_frame, text="下载进度", padding=10)
+        progress_frame.grid(row=4, column=0, sticky="ew", padx=5, pady=5)
 
-    pip_upgrade_button = ttk.Button(settings_tab, text="Upgrade Pip", command=pip_manager.upgrade_pip)
-    pip_upgrade_button.grid(row=0, column=0, columnspan=3, pady=20, padx=20)
+        # 使用更现代的进度条样式
+        download_pb = ttk.Progressbar(progress_frame, orient="horizontal", mode="determinate", length=300)
+        download_pb.grid(row=0, column=0, columnspan=3, padx=5, pady=5, sticky="ew")
+
+        # 状态信息带框架，让布局更整洁
+        status_frame = ttk.Frame(progress_frame)
+        status_frame.grid(row=1, column=0, sticky="ew", padx=5, pady=5)
+        status_frame.columnconfigure(0, weight=1)
+
+        status_label = ttk.Label(status_frame, text="请完成所有配置项", padding=5)
+        status_label.grid(row=0, column=0, sticky="w")
+
+        # 文件详情区域
+        file_details_frame = ttk.Frame(progress_frame)
+        file_details_frame.grid(row=2, column=0, sticky="ew", padx=5, pady=5)
+        file_details_frame.columnconfigure(0, weight=1)
+        file_details_frame.columnconfigure(1, weight=1)
+
+        # 左侧：文件大小
+        size_label = ttk.Label(file_details_frame, text="", padding=2)
+        size_label.grid(row=0, column=0, sticky="w")
+
+        # 右侧：下载速度
+        speed_label = ttk.Label(file_details_frame, text="", padding=2)
+        speed_label.grid(row=0, column=1, sticky="e")
+
+        main_frame.grid_rowconfigure(0, weight=1)
+        main_frame.grid_columnconfigure(0, weight=1)
     
-    progress_frame.grid_columnconfigure(0, weight=1)
-    settings_tab.grid_rowconfigure(0, weight=1)
+        # 确保进度条和详情区域能水平拉伸
+        progress_frame.columnconfigure(0, weight=1)
+        control_frame.columnconfigure(0, weight=1)
+        
+        # 设置设置标签页
+        pip_frame = ttk.LabelFrame(settings_tab, text="PIP包管理", padding=10)
+        pip_frame.grid(row=0, column=0, padx=5, pady=5, sticky="nsew")
 
-    package_label = ttk.Label(settings_tab, text="Enter Package Name:")
-    package_label.grid(row=1, column=0, pady=20, padx=20)
-
-    package_entry = ttk.Entry(settings_tab, width=60)
-    package_entry.grid(row=1, column=1, pady=20, padx=20)
-
-    #PIP(INSTALL)
-    install_button = ttk.Button(settings_tab, text="Install Package", command=pip_manager.install_package)
-    install_button.grid(row=2, column=0, columnspan=3, pady=20, padx=20)
-
-    #PIP(UNINSTALL)
-    uninstall_button = ttk.Button(settings_tab, text="Uninstall Package", command=pip_manager.uninstall_package)
-    uninstall_button.grid(row=3, column=0, columnspan=3, pady=20, padx=20)
-
-    #progressbar-options:length(number),mode(determinate(从左到右)，indeterminate(来回滚动)),...length=500,mode="indeterminate"
-    package_label = ttk.Label(settings_tab, text="", padding="10")
-    package_label.grid(row=7, column=0, columnspan=3, pady=20, padx=20)
+        # 版本信息显示
+        version_frame = ttk.Frame(pip_frame)
+        version_frame.grid(row=0, column=0, columnspan=2, padx=5, pady=5, sticky="ew")
     
-    # 初始化pip_manager和settings_manager
-    pip_manager.init_ui_references(root, package_label, install_button, pip_upgrade_button, uninstall_button, package_entry)
-    settings_manager.init_settings_manager(root, config_path)
+        current_pip_version = get_current_pip_version()
+        latest_pip_version = get_latest_pip_version()
     
-    # 启动更新任务进度的定时器
-    root.after(500, update_task_progress)
-
-    # Set sv_ttk theme
-    threading.Thread(target=python_file_reload, daemon=True).start()
-    check_python_installation()
-    threading.Thread(target=read_python_list, daemon=True).start()
-    root.resizable(False,False)
-    settings_manager.load_theme() 
-    status_label = ttk.Label(
-        control_frame,
-        text="请完成所有配置项",
-        style="Error.TLabel"
-    )
-    status_label.grid(row=5, column=0, columnspan=3, pady=5)
-
-    # 初始化下载按钮状态
-    download_button.config(state="disabled")
-    status_label.config(text="请完成所有配置项", style="Error.TLabel")
+        version_label = ttk.Label(version_frame, 
+                                    text=f"当前pip版本: {current_pip_version}\n最新pip版本: {latest_pip_version}")
+        version_label.grid(row=0, column=0, padx=5, pady=5, sticky="w")
     
-    # 在界面元素初始化后调用验证
-    def validate_download_config_threadind():
-        while True:
-            a=threading.Thread(target=validate_download_config,daemon=True)
-            a.start()
-            a.join()
+        pip_upgrade_button = ttk.Button(version_frame, text="升级Pip", 
+                                  command=pip_upgrade_wrapper)
+        pip_upgrade_button.grid(row=0, column=1, padx=5, pady=5, sticky="e")
+
+        # 包管理区域
+        package_frame = ttk.LabelFrame(pip_frame, text="包操作", padding=10)
+        package_frame.grid(row=1, column=0, columnspan=2, padx=5, pady=5, sticky="nsew")
+
+        # 包名输入区域
+        name_frame = ttk.Frame(package_frame)
+        name_frame.grid(row=0, column=0, columnspan=2, padx=5, pady=5, sticky="ew")
+    
+        package_label = ttk.Label(name_frame, text="包名称:")
+        package_label.grid(row=0, column=0, padx=5, pady=5, sticky="w")
+    
+        package_entry = ttk.Entry(name_frame, width=50)
+        package_entry.grid(row=0, column=1, padx=5, pady=5, sticky="ew")
+
+        # 操作按钮区域
+        button_frame = ttk.Frame(package_frame)
+        button_frame.grid(row=1, column=0, columnspan=2, padx=5, pady=5)
+    
+        install_button = ttk.Button(button_frame, text="安装", 
+                              command=lambda: pip_install_wrapper(package_entry.get()))
+        install_button.grid(row=0, column=0, padx=5)
+    
+        uninstall_button = ttk.Button(button_frame, text="卸载", 
+                                command=lambda: pip_uninstall_wrapper(package_entry.get()))
+        uninstall_button.grid(row=0, column=1, padx=5)
+
+        # 进度显示区域
+        progress_frame = ttk.Frame(package_frame)
+        progress_frame.grid(row=2, column=0, columnspan=2, padx=5, pady=5, sticky="ew")
+        
+        pip_progress = ttk.Progressbar(progress_frame, mode="indeterminate", length=300)
+        pip_progress.grid(row=0, column=0, padx=5, pady=5, sticky="ew")
+        
+        status_label = ttk.Label(progress_frame, text="")
+        status_label.grid(row=1, column=0, padx=5, pady=5, sticky="w")
+
+        # 配置网格权重
+        pip_frame.columnconfigure(0, weight=1)
+        package_frame.columnconfigure(1, weight=1)
+        progress_frame.columnconfigure(0, weight=1)
+    
+        # 移除旧的直接放置在settings_tab上的组件
+        for widget in settings_tab.winfo_children():
+            if widget != pip_frame:
+                widget.destroy()
+
+        progress_frame.grid_columnconfigure(0, weight=1)
+        settings_tab.grid_rowconfigure(0, weight=1)
+
+            # 状态标签
+        package_label = ttk.Label(settings_tab, text="", padding="10")
+        package_label.grid(row=7, column=0, columnspan=3, pady=20, padx=20)
+    
+        # 初始化pip_manager和settings_manager
+        init_pip_manager()
+        
+        # 修改状态标签，让其更符合中文界面
+        status_label = ttk.Label(
+            control_frame,
+            text="请完成所有配置项",
+            style="TLabel"
+        )
+        status_label.grid(row=5, column=0, columnspan=3, pady=5)
+
+        def init_ui_state():
+            """初始化UI状态"""
+            download_button.config(state="disabled")
+            status_label.config(text="请完成所有配置项")
             
-    threading.Thread(target=validate_download_config_threadind,daemon=True).start()   
-    root.mainloop()
-    #root.after(3000,)
+            # 设置主题
+            try:
+                if theme_mgr:
+                    current_theme = settings_mgr.get("theme.current_theme", "系统默认")
+                    app_logger.info(f"加载主题: {current_theme}")
+            except Exception as e:
+                error_logger.error(f"加载主题失败: {e}")
+            
+            # 尝试读取上次的下载目录，并设置为默认值
+            try:
+                last_dir = None
+                if USE_NEW_LOG_SYSTEM:
+                    last_dir = json_manager.read_json(os.path.join(config_path, "last_download.json"), {}).get("last_dir")
+                else:
+                    import json
+                    last_dir_data = sav_path.read_path(config_path, "last_download.json", "read")
+                    if last_dir_data:
+                        last_dir = json.loads(last_dir_data).get("last_dir")
+                        
+                if last_dir and os.path.exists(last_dir):
+                    destination_entry.delete(0, tk.END)
+                    destination_entry.insert(0, last_dir)
+                    app_logger.info(f"加载上次下载目录: {last_dir}")
+            except Exception as e:
+                error_logger.error(f"加载上次下载目录失败: {e},Line1239,{myfilenumber},init_ui_state")
+    
+        def validate_download_config_thread():
+            """在后台线程中验证下载配置，避免在UI线程中直接运行可能阻塞的验证"""
+            try:
+                # 获取当前值，以便在线程中使用
+                def get_ui_values():
+                    values = {}
+                    try:
+                        values["version"] = version_combobox.get()
+                        values["file_name"] = choose_file_combobox.get()
+                        values["dest_path"] = destination_entry.get()
+                        return values
+                    except Exception as ex:
+                        error_logger.error(f"获取UI值失败: {str(ex)},Line1253,{myfilenumber},validate_download_config_thread")
+                        return {}
+                
+                # 首先在主线程中获取值
+                if threading.current_thread() == threading.main_thread():
+                    ui_values = get_ui_values()
+                else:
+                    values_queue = queue.Queue()
+                    root.after(0, lambda: values_queue.put(get_ui_values()))
+                    ui_values = values_queue.get(timeout=1)
+                
+                # 验证值
+                version = ui_values.get("version", "")
+                file_name = ui_values.get("file_name", "")
+                dest_path = ui_values.get("dest_path", "")
+                
+                version_valid = validate_version(version)
+                file_valid = bool(file_name)
+                path_valid = validate_path(dest_path)
+                all_valid = version_valid and file_valid and path_valid
+                
+                # 将验证结果调度到主线程
+                def update_ui():
+                    # 只有在界面没有正在下载的任务时才更新按钮状态
+                    if not is_downloading:
+                        # 更新下载按钮状态
+                        if download_button and download_button.winfo_exists():
+                            download_button.config(state="normal" if all_valid else "disabled")
+                        
+                        # 更新状态消息
+                        if status_label and status_label.winfo_exists():#判断状态标签是否存在
+                            all_error=[]
+                            if version_valid is not None:
+                                all_error.append("请选择有效的Python版本")
+                            else:
+                                all_error.remove("请选择有效的Python版本")
+                            if file_valid is not None:
+                                all_error.append("请选择要下载的文件")
+                            else:
+                                all_error.remove("请选择要下载的文件")
+                            if path_valid is not None:
+                                all_error.append("请选择有效的下载目录")
+                            else:
+                                all_error.remove("请选择有效的下载目录")
+                            all_error_str=""
+                            for i in all_error:
+                                all_error_str+=i+"\n"
+                            if all_error_str!="":
+                                status_label.config(text=all_error_str,foreground="red")
+                            else:
+                                status_label.config(text="配置有效，可以开始下载")
+                # 在主线程中安全地执行UI更新
+                
+                def update_ui_thread():
+                    while True:
+                        a=threading.Thread(target=update_ui, daemon=True)
+                        a.start()
+                        a.join()
+                        time.sleep(0.3)
+                threading.Thread(target=update_ui_thread, daemon=True).start()
+               
+            except Exception as error_ex:
+                def show_error(error_msg):
+                    if status_label and status_label.winfo_exists():
+                        status_label.config(text=f"验证配置时出错: {error_msg},Line1302,{myfilenumber},validate_download_config_thread")
+                    app_logger.error(f"验证下载配置出错: {error_msg},Line1303,{myfilenumber},validate_download_config_thread")
+                
+                error_msg = str(error_ex)
+                if threading.current_thread() == threading.main_thread():
+                    show_error(error_msg)
+                else:
+                    root.after(0, lambda: show_error(error_msg))
+        
+        # 启动验证线程
+        threading.Thread(target=validate_download_config_thread, daemon=True).start()
+
+        # 启动监控进程
+        threading.Thread(target=show_name, daemon=True).start()
+        
+        # 检查Python安装
+        check_python_installation()
+        
+        # 读取Python版本列表
+        threading.Thread(target=read_python_list, daemon=True).start()
+        
+        # 设置窗口不可调整大小
+        root.resizable(False, False)
+        
+        # 初始化UI状态
+        init_ui_state()
+    
+        # 启动任务进度更新定时器
+        root.after(500, update_task_progress)
+        
+        # 设置主题
+        sv_ttk.set_theme("dark")
+        
+        def finalize_window_setup():
+            """完成窗口设置"""
+            root.update_idletasks()
+            root.eval('tk::PlaceWindow . center')
+            app_logger.info("GUI初始化完成")
+
+        # 完成窗口设置
+        finalize_window_setup()
+        
+        # 启动主循环
+        root.mainloop()
+    except Exception as e:
+        error_logger.error(f"主程序执行失败: {e},Line1320,{myfilenumber},main")
+        messagebox.showerror("错误", f"主程序执行失败: {e},Line1321,{myfilenumber},main")
+    exit(1)
+
 if block_features.block_start()==False:
     from get_system_build import system_build
-    messagebox.showerror("Error",f"You can not open Pyquick:\nYour system is not supported. \n(Your version: {system_build.get_system_name()} {system_build.get_system_release_build_version()})\n Please upgrade to macOS 10.13(Darwin 17) or later.")
+    messagebox.showerror("错误",f"无法运行Pyquick:\n您的系统不受支持。\n(当前版本: {system_build.get_system_name()} {system_build.get_system_release_build_version()})\n请升级到macOS 10.13(Darwin 17)或更高版本。")
     exit(1)

@@ -6,5 +6,5 @@ darkdetect
 psutil==5.9.5
 memory-profiler==0.61.0
 # 图形界面依赖
-PyQt5==5.15.9
-qfluentwidgets==0.7.4
+PyQt6
+PyQt6-Fluent-Widgets[Full]

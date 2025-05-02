@@ -1,5 +1,8 @@
 import enum
 import os
+import logging
+
+logger = logging.getLogger(__name__)
 import time
 from typing import Dict, List, Optional
 
@@ -81,39 +84,61 @@ class DownloadTask:
     def update_progress(self, downloaded_size: int, speed: float):
         """更新下载进度"""
         now = time.time()
-        self.downloaded_size = downloaded_size
-        self.speed = speed
-        
-        if self.content_length > 0:
-            self.progress = min(100.0, (downloaded_size / self.content_length) * 100)
+        try:
+            self.downloaded_size = int(downloaded_size)
+            self.speed = float(speed)
             
-        # 更新速度采样
-        self._speed_samples.append((now, speed))
-        cutoff_time = now - self._sample_window
-        self._speed_samples = [(t, s) for t, s in self._speed_samples if t >= cutoff_time]
-        
-        self.last_active_time = now
+            if self.content_length > 0:
+                self.progress = round(min(100.0, (self.downloaded_size / self.content_length) * 100), 2)
+            else:
+                self.progress = 0.0
+                
+            # 更新速度采样，使用安全的类型转换
+            self._speed_samples = [(t, float(s)) for t, s in self._speed_samples 
+                                 if isinstance(t, (int, float)) and 
+                                 isinstance(s, (int, float)) and 
+                                 now - t <= self._sample_window]
+            self._speed_samples.append((now, self.speed))
+            
+            self.last_active_time = now
+        except (ValueError, TypeError) as e:
+            logger.error(f"Error updating progress: {str(e)}")
+            self.progress = 0.0
+            self.speed = 0.0
         
     def get_average_speed(self) -> float:
         """获取平均下载速度(B/s)"""
-        if not self._speed_samples:
+        try:
+            if not self._speed_samples:
+                return 0.0
+                
+            valid_samples = [(t, s) for t, s in self._speed_samples 
+                            if isinstance(s, (int, float)) and s >= 0]
+            if not valid_samples:
+                return 0.0
+                
+            total_speed = sum(speed for _, speed in valid_samples)
+            return total_speed / len(valid_samples)
+        except Exception as e:
+            logger.error(f"Error calculating average speed: {str(e)}")
             return 0.0
-            
-        total_speed = sum(speed for _, speed in self._speed_samples)
-        return total_speed / len(self._speed_samples)
-        
+
     def get_eta(self) -> float:
         """获取预计剩余时间(秒)"""
-        if self.status != DownloadStatus.DOWNLOADING or self.content_length <= 0:
+        try:
+            if self.status != DownloadStatus.DOWNLOADING or self.content_length <= 0:
+                return 0.0
+                
+            avg_speed = self.get_average_speed()
+            if avg_speed <= 0:
+                return 0.0
+                
+            remaining_bytes = max(0, self.content_length - self.downloaded_size)
+            return remaining_bytes / avg_speed
+        except Exception as e:
+            logger.error(f"Error calculating ETA: {str(e)}")
             return 0.0
-            
-        avg_speed = self.get_average_speed()
-        if avg_speed <= 0:
-            return 0.0
-            
-        remaining_bytes = self.content_length - self.downloaded_size
-        return remaining_bytes / avg_speed
-        
+
     def get_elapsed_time(self) -> float:
         """获取已用时间(秒)"""
         if self.start_time == 0:
@@ -136,7 +161,10 @@ class DownloadTask:
         
     def get_formatted_progress(self) -> str:
         """获取格式化的进度信息"""
-        return f"{self.progress:.1f}%"
+        try:
+            return f"{float(self.progress):.1f}%"
+        except (ValueError, TypeError):
+            return "0.0%"
         
     def get_formatted_eta(self) -> str:
         """获取格式化的预计剩余时间"""

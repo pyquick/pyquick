@@ -1,0 +1,32 @@
+{
+    "name": "dark",
+    "display_name": "深色主题",
+    "colors": {
+        "primary": "#0098ff",
+        "secondary": "#00b0ff",
+        "background": "#1e1e1e",
+        "surface": "#252526",
+        "text": "#ffffff",
+        "text_secondary": "#cccccc",
+        "border": "#404040",
+        "success": "#2ea043",
+        "warning": "#d29922",
+        "error": "#f85149",
+        "info": "#58a6ff"
+    },
+    "fonts": {
+        "default": {
+            "family": "系统默认",
+            "size": 12
+        },
+        "title": {
+            "family": "系统默认",
+            "size": 14,
+            "weight": "bold"
+        },
+        "small": {
+            "family": "系统默认",
+            "size": 10
+        }
+    }
+}

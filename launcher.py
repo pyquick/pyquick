@@ -24,7 +24,6 @@ class Window(FluentWindow):
         self.addSubInterface(self.settingInterface, FIF.SETTING, 'Settings', NavigationItemPosition.BOTTOM)
     def initWindow(self):
         self.resize(900, 700)
-        self.setWindowIcon(QIcon('pyquick.icns'))
         self.setWindowTitle('PyQt-Fluent-Widgets')
 
 

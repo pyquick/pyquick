@@ -6,9 +6,17 @@ import uuid
 from enum import Enum
 from typing import Dict, List, Optional, Callable, Any, Tuple
 import logging
-
+from concurrent.futures import ThreadPoolExecutor
 from .DownloadTask import DownloadStatus
 from .MultiThreadDownloader import MultiThreadDownloader
+
+# 尝试导入日志系统，如果不存在则使用标准日志
+try:
+    from log import download_logger, error_logger
+except ImportError:
+    # 使用标准日志模块作为后备
+    download_logger = logging.getLogger("download")
+    error_logger = logging.getLogger("error")
 
 class TaskStatus(Enum):
     """下载任务状态"""
@@ -35,6 +43,15 @@ class DownloadTask:
         self.end_time = None
         self.error = None
         self.callbacks = []  # 回调函数列表
+        self.total_size = 0      # 文件总大小
+        self.downloaded_size = 0 # 已下载大小
+
+    def update_status(self, status, error=""):
+        """更新任务状态"""
+        self.status = status
+        if error:
+            self.error = error
+        self.notify_callbacks()
 
     def register_callback(self, callback):
         """注册状态变化回调"""
@@ -54,7 +71,7 @@ class DownloadTask:
                 try:
                     executor.submit(callback, self)
                 except Exception as e:
-                    print(f"回调错误: {e}")
+                    download_logger.error(f"回调错误: {e}")
 
     def on_progress(self, progress, speed, status):
         """进度更新回调"""
@@ -85,7 +102,7 @@ class DownloadTask:
             self.downloader = Downloader(
                 url=self.url,
                 file_path=self.file_path,
-                num_threads=self.num_threads,
+                num_threads=self.thread_count,
                 proxies=self.proxies,
                 on_progress=self.on_progress
             )
@@ -103,15 +120,19 @@ class DownloadTask:
     def _start_download(self):
         """启动下载器的线程函数"""
         try:
+            download_logger.info(f"开始下载任务: {self.task_id}, URL: {self.url}")
             self.downloader.start()
         except Exception as e:
+            error_msg = str(e)
+            error_logger.error(f"下载任务 {self.task_id} 出错: {error_msg}")
             self.status = 'error'
-            self.error = str(e)
+            self.error = error_msg
             self.notify_callbacks()
 
     def pause(self):
         """暂停下载任务"""
         if self.downloader and self.status == 'downloading':
+            download_logger.info(f"暂停下载任务: {self.task_id}")
             self.downloader.pause()
             self.status = 'paused'
             self.notify_callbacks()
@@ -121,6 +142,7 @@ class DownloadTask:
     def resume(self):
         """恢复下载任务"""
         if self.downloader and self.status == 'paused':
+            download_logger.info(f"恢复下载任务: {self.task_id}")
             self.status = 'downloading'  
             self.notify_callbacks()
             
@@ -136,6 +158,7 @@ class DownloadTask:
     def cancel(self):
         """取消下载任务"""
         if self.downloader and self.status in ['downloading', 'paused']:
+            download_logger.info(f"取消下载任务: {self.task_id}")
             self.downloader.cancel()
             self.status = 'cancelled'
             self.notify_callbacks()
@@ -178,6 +201,14 @@ class DownloadTask:
             minutes = int((duration % 3600) // 60)
             return f"{hours} 小时 {minutes} 分"
 
+    def get_eta(self):
+        """获取预计剩余时间（秒）"""
+        if self.speed <= 0 or self.total_size <= 0 or self.downloaded_size >= self.total_size:
+            return 0
+            
+        remaining_bytes = self.total_size - self.downloaded_size
+        return remaining_bytes / self.speed
+
     def __str__(self):
         return f"DownloadTask(id={self.task_id}, url={self.url}, status={self.status})"
         
@@ -189,7 +220,7 @@ class DownloadTask:
             "save_path": self.file_path,
             "filename": self.get_file_name(),
             "full_path": self.file_path,
-            "status": self.status.value,
+            "status": self.status,
             "progress": self.progress,
             "total_size": self.total_size,
             "downloaded_size": self.downloaded_size,
@@ -206,8 +237,6 @@ class DownloadManager:
     def __init__(self, task_db_path=None, max_concurrent_downloads=2, 
                 num_threads_per_download=4, on_task_status_changed=None, status_callback=None):
         """初始化下载管理器
-        self.lock = threading.Lock()
-        self.status_callback = status_callback
         
         优化参数:
         - max_concurrent_downloads: 并发下载数从3降为2，减少系统负载
@@ -231,15 +260,17 @@ class DownloadManager:
         
         # 回调函数
         self.on_task_status_changed = on_task_status_changed
+        self.status_callback = status_callback
         self.on_task_added = None
         self.on_task_removed = None
         self.on_task_progress = None
         
         # 启动队列处理线程
         self._start_queue_processor()
-        super().__init__()
         
-    def add_task(self, url: str, file_path: str, thread_count: int , 
+        download_logger.info(f"下载管理器初始化: 最大并发={max_concurrent_downloads}, 线程数={num_threads_per_download}")
+        
+    def add_task(self, url: str, file_path: str, thread_count: int = None, 
                proxies: Optional[Dict[str, str]] = None) -> str:
         """
         添加新的下载任务
@@ -247,13 +278,17 @@ class DownloadManager:
         Args:
             url: 下载链接
             file_path: 文件保存路径
-            thread_count: 下载线程数
+            thread_count: 下载线程数，如不指定使用默认值
             proxies: 代理配置
             
         Returns:
             任务ID
         """
         with self.lock:
+            # 使用指定线程数或默认值
+            if thread_count is None:
+                thread_count = self.num_threads_per_download
+            
             # 生成唯一任务ID
             task_id = str(uuid.uuid4())
             
@@ -284,6 +319,8 @@ class DownloadManager:
             # 回调通知
             if self.on_task_added:
                 self.on_task_added(task)
+                
+            download_logger.info(f"添加下载任务: {task_id}, URL: {url}, 保存路径: {file_path}")
             
             return task_id
     
@@ -299,6 +336,7 @@ class DownloadManager:
         """
         with self.lock:
             if task_id not in self.tasks or task_id not in self.downloaders:
+                download_logger.error(f"启动任务失败: 任务 {task_id} 不存在")
                 return False
                 
             task = self.tasks[task_id]
@@ -309,6 +347,7 @@ class DownloadManager:
                 
             # 如果已经完成，无法再次启动
             if task.status == DownloadStatus.COMPLETED:
+                download_logger.warning(f"任务 {task_id} 已完成，无法重新启动")
                 return False
                 
             # 如果正在等待，直接返回
@@ -325,6 +364,7 @@ class DownloadManager:
                     
                 # 启动下载器
                 self.downloaders[task_id].start()
+                download_logger.info(f"启动下载任务: {task_id}")
                 return True
             else:
                 # 添加到等待队列
@@ -335,6 +375,7 @@ class DownloadManager:
                 if self.on_task_status_changed:
                     self.on_task_status_changed(task)
                     
+                download_logger.info(f"任务 {task_id} 添加到等待队列")
                 return True
     
     def pause_task(self, task_id: str) -> bool:
@@ -349,6 +390,7 @@ class DownloadManager:
         """
         with self.lock:
             if task_id not in self.tasks or task_id not in self.downloaders:
+                download_logger.error(f"暂停任务失败: 任务 {task_id} 不存在")
                 return False
                 
             task = self.tasks[task_id]
@@ -358,6 +400,7 @@ class DownloadManager:
             if task.status == DownloadStatus.DOWNLOADING:
                 downloader.pause()
                 self.active_downloads -= 1
+                download_logger.info(f"暂停下载任务: {task_id}")
                 return True
                 
             # 如果任务在等待，从队列中移除
@@ -369,6 +412,7 @@ class DownloadManager:
                 if self.on_task_status_changed:
                     self.on_task_status_changed(task)
                     
+                download_logger.info(f"从等待队列移除并暂停任务: {task_id}")
                 return True
                 
             return False
@@ -385,6 +429,7 @@ class DownloadManager:
         """
         with self.lock:
             if task_id not in self.tasks or task_id not in self.downloaders:
+                download_logger.error(f"恢复任务失败: 任务 {task_id} 不存在")
                 return False
                 
             task = self.tasks[task_id]
@@ -398,6 +443,7 @@ class DownloadManager:
             if self.active_downloads < self.max_concurrent_downloads:
                 self.active_downloads += 1
                 downloader.resume()
+                download_logger.info(f"恢复下载任务: {task_id}")
                 return True
             else:
                 # 添加到等待队列
@@ -408,6 +454,7 @@ class DownloadManager:
                 if self.on_task_status_changed:
                     self.on_task_status_changed(task)
                     
+                download_logger.info(f"任务 {task_id} 加入等待队列")
                 return True
     
     def cancel_task(self, task_id: str) -> bool:
@@ -422,6 +469,7 @@ class DownloadManager:
         """
         with self.lock:
             if task_id not in self.tasks or task_id not in self.downloaders:
+                download_logger.error(f"取消任务失败: 任务 {task_id} 不存在")
                 return False
                 
             task = self.tasks[task_id]
@@ -437,6 +485,7 @@ class DownloadManager:
                 
             # 取消下载
             downloader.cancel()
+            download_logger.info(f"取消下载任务: {task_id}")
             
             return True
     
@@ -453,6 +502,7 @@ class DownloadManager:
         """
         with self.lock:
             if task_id not in self.tasks:
+                download_logger.error(f"移除任务失败: 任务 {task_id} 不存在")
                 return False
                 
             # 先取消任务
@@ -465,8 +515,9 @@ class DownloadManager:
                 if os.path.exists(task.file_path):
                     try:
                         os.remove(task.file_path)
-                    except Exception:
-                        pass
+                        download_logger.info(f"删除文件: {task.file_path}")
+                    except Exception as e:
+                        error_logger.error(f"删除文件失败 {task.file_path}: {e}")
                         
             # 移除任务和下载器
             if task_id in self.downloaders:
@@ -477,6 +528,7 @@ class DownloadManager:
             if self.on_task_removed:
                 self.on_task_removed(task_id)
                 
+            download_logger.info(f"移除下载任务: {task_id}")
             return True
     
     def get_task(self, task_id: str) -> Optional[DownloadTask]:
@@ -491,12 +543,14 @@ class DownloadManager:
     
     def pause_all(self):
         """暂停所有下载"""
+        download_logger.info("暂停所有下载任务")
         with self.lock:
             for task_id in list(self.tasks.keys()):
                 self.pause_task(task_id)
     
     def resume_all(self):
         """恢复所有下载"""
+        download_logger.info("恢复所有暂停的下载任务")
         with self.lock:
             for task_id, task in self.tasks.items():
                 if task.status == DownloadStatus.PAUSED:
@@ -504,6 +558,7 @@ class DownloadManager:
     
     def cancel_all(self):
         """取消所有下载"""
+        download_logger.info("取消所有下载任务")
         with self.lock:
             for task_id in list(self.tasks.keys()):
                 self.cancel_task(task_id)
@@ -511,7 +566,9 @@ class DownloadManager:
     def set_max_concurrent_downloads(self, count: int):
         """设置最大并行下载数"""
         with self.lock:
+            old_value = self.max_concurrent_downloads
             self.max_concurrent_downloads = max(1, count)
+            download_logger.info(f"设置最大并发下载数: {old_value} -> {self.max_concurrent_downloads}")
             
             # 处理队列，可能有新的下载可以开始
             self._process_queue()
@@ -561,6 +618,15 @@ class DownloadManager:
     
     def _on_progress_callback(self, task: DownloadTask):
         """下载进度回调"""
+        # 节流控制，减少不必要的回调
+        if hasattr(self, '_last_progress_time'):
+            current_time = time.time()
+            if current_time - self._last_progress_time < 0.1:  # 每100ms最多更新一次
+                return
+            self._last_progress_time = current_time
+        else:
+            self._last_progress_time = time.time()
+            
         if self.on_task_progress:
             self.on_task_progress(task)
     
@@ -569,6 +635,7 @@ class DownloadManager:
         with self.lock:
             if task.task_id in self.tasks:
                 self.active_downloads -= 1
+                download_logger.info(f"下载任务完成: {task.task_id}")
                 
                 # 处理队列中的下一个任务
                 self._process_queue()
@@ -582,6 +649,7 @@ class DownloadManager:
         with self.lock:
             if task.task_id in self.tasks:
                 self.active_downloads -= 1
+                error_logger.error(f"下载任务错误: {task.task_id}, {error_msg}")
                 
                 # 处理队列中的下一个任务
                 self._process_queue()
@@ -635,17 +703,21 @@ class DownloadManager:
             
     def to_dict(self, task):
         """转换为字典格式"""
+        status_str = task.status
+        if isinstance(task.status, Enum):
+            status_str = task.status.value
+            
         return {
             "task_id": task.task_id,
             "url": task.url,
             "filename": task.get_file_name(),
-            "status": task.status.value,
+            "status": status_str,
             "progress": task.progress,
             "total_size": self.format_size(task.total_size),
             "downloaded_size": self.format_size(task.downloaded_size),
             "speed": self.format_speed(task),
             "eta": self.get_eta(task) if task.status == 'downloading' else "",
-            "create_time": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(task.start_time)),
+            "create_time": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(task.start_time) if task.start_time else time.time()),
             "error_message": task.error
         }
 
@@ -656,7 +728,30 @@ class DownloadManager:
         
         with self.lock:
             for task in self.tasks.values():
-                counts[task.status.value] += 1
+                status = task.status
+                if isinstance(status, Enum):
+                    status = status.value
+                elif isinstance(status, str):
+                    status = status
+                
+                if status in counts:
+                    counts[status] += 1
                 counts["total"] += 1
                 
         return counts
+        
+    def get_progress(self, task_id: str) -> float:
+        """
+        获取下载进度百分比
+        
+        Args:
+            task_id: 任务ID
+            
+        Returns:
+            float: 进度百分比 (0-100)
+        """
+        task = self.get_task(task_id)
+        if not task:
+            return 0.0
+            
+        return task.progress

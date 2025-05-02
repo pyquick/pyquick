@@ -1,0 +1,12 @@
+{
+  "current_theme": {
+    "name": "system",
+    "display_name": "系统默认",
+    "colors": {
+      "primary": "#007acc",
+      "secondary": "#6c757d",
+      "background": "#ffffff",
+      "text": "#000000"
+    }
+  }
+}
