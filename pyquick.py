@@ -453,13 +453,13 @@ def python_file_reload():
             r6 = r'python-\S+.sig'
             r7 = r'python-\S+.asc'
         
-            results = []
-            for i in bs.find_all("a"):
-                # 使用正则匹配版本号格式
-                if (re.match(r1, i.text) or re.match(r2, i.text) or 
-                    re.match(r3, i.text) or re.match(r4, i.text) or 
-                    re.match(r5, i.text) or re.match(r6, i.text) or 
-                    re.match(r7, i.text)) and "exe" not in i.text and "win" not in i.text and "embed" not in i.text:
+        results = []
+        for i in bs.find_all("a"):
+            # 使用正则匹配版本号格式
+            if (re.match(r1, i.text) or re.match(r2, i.text) or 
+                re.match(r3, i.text) or re.match(r4, i.text) or 
+                re.match(r5, i.text) or re.match(r6, i.text) or 
+                re.match(r7, i.text)) and "exe" not in i.text and "win" not in i.text and "embed" not in i.text:
                     packages = i.text.strip(" ")
                     results.append(packages)
                     
@@ -809,7 +809,7 @@ def init_download_manager(force_reset=False):
     # 如果下载管理器为None，创建新的实例
     if download_manager is None:
         try:
-            # 优化线程数配置
+        # 优化线程数配置
             thread_count = min(max(2, int(threads_entry.get())), os.cpu_count() * 2)
             
             # 定义下载完成回调函数，确保函数签名匹配downloader中的要求
@@ -843,7 +843,7 @@ def init_download_manager(force_reset=False):
             error_logger.error(f"初始化下载管理器失败: {e}")
             traceback.print_exc()
             return None
-    
+
     return download_manager
 
 def update_download_ui():
@@ -854,8 +854,8 @@ def update_download_ui():
 
     # 如果不是下载状态，不更新UI
     if not is_downloading:
-        return
-        
+            return
+
     # 使用标志防止重复调用和竞态条件
     if hasattr(update_download_ui, "_is_updating") and update_download_ui._is_updating:
         return
@@ -927,7 +927,6 @@ def update_download_ui():
                         speed_str = f"{speed/1024:.1f}KB/s"
                     else:
                         speed_str = f"{speed/(1024*1024):.2f}MB/s"
-                
                 # 状态文本
                 if status_str == 'error' and hasattr(task, 'error') and task.error:
                     status_text = f"下载错误: {task.error}"
@@ -1228,7 +1227,7 @@ def download_selected_version():
     # 验证下载配置
     if not validate_download_config():
         return
-        
+    
     selected_version = version_combobox.get()
     destination_path = destination_entry.get()
     file_name = choose_file_combobox.get()
@@ -1356,7 +1355,7 @@ def download_selected_version():
             app_logger.info(f"保存下载目录: {destination_path}")
         except Exception as save_err:
             error_logger.error(f"保存下载目录失败: {str(save_err)}")
-        
+    
     except Exception as e:
         error_logger.error(f"设置下载失败: {str(e)}")
         traceback.print_exc()
@@ -1629,7 +1628,7 @@ def resume_download():
     except Exception as e:
         error_logger.error(f"恢复下载失败: {e}")
         messagebox.showerror("错误", f"恢复下载失败: {e}")
-        
+
 def pause_download():
     """暂停下载"""
     global download_manager, current_task_id
@@ -1651,7 +1650,7 @@ def pause_download():
     except Exception as e:
         error_logger.error(f"暂停下载失败: {e}")
         messagebox.showerror("错误", f"暂停下载失败: {e}")
-        
+
 def show_about():
     messagebox.showinfo("About", f"Version: dev\nBuild: 1962\n10086 days left.")
 
@@ -1888,11 +1887,11 @@ def apply_theme(refresh=False):
         if theme_setting == "系统默认":
             try:
                 if darkdetect.isDark():
-                    theme = "darkly"  # 深色主题
+                        theme = "darkly"  # 深色主题
                 else:
-                    theme = "litera"  # 浅色主题
+                        theme = "litera"  # 浅色主题
             except:
-                theme = "litera"  # 默认浅色主题
+                    theme = "litera"  # 默认浅色主题
         # 明确选择的主题
         elif theme_setting == "浅色":
             theme = "litera"
@@ -2353,8 +2352,6 @@ if __name__ == "__main__":
         
         # 设置窗口标题和大小
         root.title("PyQuick - Python下载器")
-        #root.geometry("750x520")
-        #root.minsize(750, 520)
         
         # 创建界面
         create_ui(root)
@@ -2433,8 +2430,9 @@ def set_icon(window):
                 window.iconbitmap(icon_path)
             else:
                 # MacOS和Linux使用PhotoImage
-                icon_img = tk.PhotoImage(file=icon_path)
-                window.iconphoto(True, icon_img)
+                #icon_img = tk.PhotoImage(file=icon_path)
+                #window.iconphoto(True, icon_img)
+                pass
     except Exception as e:
         error_logger.error(f"设置窗口图标失败: {e}")
 

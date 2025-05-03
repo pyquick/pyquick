@@ -73,11 +73,11 @@ class SettingsWindow:
         
         # 创建各个设置面板
         try:
-            # 常规设置选项卡
+        # 常规设置选项卡
             general_panel = GeneralSettingsPanel(tab_control, self.settings_manager)
             tab_control.add(general_panel, text="常规设置")
             self.panels.append(general_panel)
-            
+        
             # 外观设置选项卡
             appearance_panel = AppearanceSettingsPanel(tab_control, self.settings_manager)
             tab_control.add(appearance_panel, text="外观设置")
@@ -157,7 +157,7 @@ class SettingsWindow:
                     messagebox.showerror("错误", f"应用设置失败: {e}")
             else:
                 messagebox.showerror("错误", "应用设置失败")
-    
+            
     def _validate_and_save_all(self):
         """验证并保存所有面板的设置"""
         try:

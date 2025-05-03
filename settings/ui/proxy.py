@@ -75,7 +75,7 @@ class ProxySettingsPanel(BaseSettingsPanel):
         
         auth_check = ttk.Checkbutton(auth_frame, text="使用认证", 
                                    variable=self.use_auth_var,
-                                   command=self._toggle_auth_fields)
+                                    command=self._toggle_auth_fields)
         auth_check.pack(side=tk.LEFT, padx=5)
         
         # 用户名
@@ -296,11 +296,11 @@ class ProxySettingsPanel(BaseSettingsPanel):
         if not host:
             self.status_label.config(text="请输入代理服务器地址", foreground="red")
             return False
-        
+            
         if not port:
             self.status_label.config(text="请输入代理服务器端口", foreground="red")
             return False
-        
+            
         try:
             port_num = int(port)
             if port_num <= 0 or port_num > 65535:
@@ -309,7 +309,7 @@ class ProxySettingsPanel(BaseSettingsPanel):
         except ValueError:
             self.status_label.config(text="端口号必须是数字", foreground="red")
             return False
-        
+            
         # 验证认证信息
         if self.use_auth_var.get():
             username = self.proxy_username_var.get()

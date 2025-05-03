@@ -149,7 +149,7 @@ def install_package(package_name, version=None, upgrade=False, show_output=True)
         logger.info(f"执行命令: {' '.join(cmd)}")
         process = subprocess.Popen(
             cmd,
-            stdout=subprocess.PIPE, 
+            stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True
         )
@@ -167,7 +167,7 @@ def install_package(package_name, version=None, upgrade=False, show_output=True)
     except Exception as e:
         logger.error(f"安装包 {package_name} 时出错: {str(e)}")
         return False
-        
+
 def uninstall_package(package_name, show_output=True):
     """
     卸载Python包
@@ -183,7 +183,7 @@ def uninstall_package(package_name, show_output=True):
         if not package_name:
             logger.error("未指定包名称")
             return False
-            
+        
         logger.info(f"开始卸载包: {package_name}")
         
         # 根据系统选择合适的命令
@@ -199,7 +199,7 @@ def uninstall_package(package_name, show_output=True):
         logger.info(f"执行命令: {' '.join(cmd)}")
         process = subprocess.Popen(
             cmd,
-            stdout=subprocess.PIPE, 
+            stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True
         )

@@ -89,7 +89,7 @@ def upgrade_pip(show_output: bool = False) -> bool:
             return True
         else:
             print(f"pip升级失败: {stderr}")
-            return False
+        return False
     except Exception as e:
         print(f"pip升级过程中出错: {e}")
         return False

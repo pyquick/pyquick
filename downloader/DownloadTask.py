@@ -183,7 +183,7 @@ class DownloadTask:
         self._notify_callbacks()
         
         self.last_active_time = time.time()
-    
+        
     def get_average_speed(self) -> float:
         """获取平均下载速度(B/s)"""
         try:
@@ -208,7 +208,7 @@ class DownloadTask:
             
         if self.speed <= 0 or self.content_length <= 0:
             return -1  # 无法估计
-            
+                
         remaining_bytes = self.content_length - self.downloaded_size
         return int(remaining_bytes / self.speed)
     

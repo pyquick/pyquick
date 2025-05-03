@@ -291,7 +291,7 @@ class DownloadManager:
         self._start_task_monitor()
         
         download_logger.info(f"下载管理器初始化: 最大并发={max_concurrent_downloads}, 线程数={num_threads_per_download}")
-    
+        
     def _start_task_monitor(self):
         """启动任务监控线程"""
         monitor_thread = threading.Thread(
@@ -403,7 +403,7 @@ class DownloadManager:
             # 如果未指定线程数，使用默认值
             if thread_count is None:
                 thread_count = self.num_threads_per_download
-                
+            
             # 创建下载任务
             task = DownloadTask(
                 url=url,
@@ -422,11 +422,11 @@ class DownloadManager:
                 self.tasks[task_id] = task
                 # Add to waiting queue, status will be updated later
                 if task_id not in self.waiting_queue:
-                     self.waiting_queue.append(task_id)
+                    self.waiting_queue.append(task_id)
                 task.update_status(TaskStatus.WAITING.value) # Set initial status
-
+                
             download_logger.info(f"添加下载任务：{task_id}, URL: {url}, Status: {task.status}")
-
+            
             return task_id
             
         except Exception as e:
@@ -439,7 +439,7 @@ class DownloadManager:
         
         Args:
             task_id: 任务ID
-
+            
         Returns:
             bool: 是否成功启动或加入等待队列
         """
@@ -448,7 +448,7 @@ class DownloadManager:
             if not task:
                 error_logger.error(f"启动任务失败: 任务 {task_id} 不存在于 tasks 字典")
                 return False
-
+                
             # 如果任务已经在运行，直接返回成功
             if task.status == TaskStatus.DOWNLOADING.value:
                 download_logger.info(f"任务 {task_id} 已在下载中，无需启动")
@@ -458,11 +458,11 @@ class DownloadManager:
             if task.status in [TaskStatus.COMPLETED.value, TaskStatus.CANCELLED.value]:
                 download_logger.warning(f"任务 {task_id} 状态为 {task.status}，无法启动")
                 return False
-
+                
             # 检查是否可以立即开始
             if len(self.active_tasks) < self.max_concurrent_downloads:
                 download_logger.info(f"尝试立即启动任务: {task_id}")
-                
+            
                 # 从等待队列移除(如果在里面)
                 if task_id in self.waiting_queue:
                     self.waiting_queue.remove(task_id)
@@ -474,7 +474,7 @@ class DownloadManager:
                 try:
                     # 更新状态为connecting
                     task.update_status(TaskStatus.CONNECTING.value)
-                    
+                
                     if self.on_task_status_changed:
                         try:
                             self.on_task_status_changed(task)
@@ -501,13 +501,13 @@ class DownloadManager:
                 # 更新状态为等待
                 if task.status != TaskStatus.WAITING.value:
                     task.update_status(TaskStatus.WAITING.value)
+                
+                if self.on_task_status_changed:
+                    try:
+                        self.on_task_status_changed(task)
+                    except Exception as cb_err:
+                        error_logger.error(f"等待任务状态回调失败: {cb_err}")
                     
-                    if self.on_task_status_changed:
-                        try:
-                            self.on_task_status_changed(task)
-                        except Exception as cb_err:
-                            error_logger.error(f"等待任务状态回调失败: {cb_err}")
-                            
                 download_logger.info(f"并发数已满，任务 {task_id} 添加到等待队列")
                 return True
     
@@ -517,7 +517,7 @@ class DownloadManager:
         
         Args:
             task_id: 任务ID
-
+            
         Returns:
             bool: 是否成功暂停
         """
@@ -526,7 +526,7 @@ class DownloadManager:
             if not task:
                 error_logger.error(f"暂停任务失败: 任务 {task_id} 不存在")
                 return False
-
+                
             # 如果任务正在下载，调用 task.pause()
             if task.status == TaskStatus.DOWNLOADING.value:
                 if task.pause(): # task.pause updates status and calls callbacks
@@ -538,7 +538,7 @@ class DownloadManager:
                 else:
                     error_logger.error(f"调用 task.pause() 失败 for {task_id}")
                     return False
-
+                
             # 如果任务在等待，从队列中移除并标记为暂停
             elif task.status == TaskStatus.WAITING.value:
                 if task_id in self.waiting_queue:
@@ -547,10 +547,10 @@ class DownloadManager:
                 download_logger.info(f"从等待队列移除并标记为暂停: {task_id}")
                 # Trigger status change callback if needed
                 if self.on_task_status_changed:
-                     try:
-                         self.on_task_status_changed(task)
-                     except Exception as cb_err:
-                         error_logger.error(f"暂停等待任务状态回调失败 for {task_id}: {cb_err}")
+                    try:
+                        self.on_task_status_changed(task)
+                    except Exception as cb_err:
+                        error_logger.error(f"暂停等待任务状态回调失败 for {task_id}: {cb_err}")
                 return True
                 
             return False
@@ -561,7 +561,7 @@ class DownloadManager:
         
         Args:
             task_id: 任务ID
-
+            
         Returns:
             bool: 是否成功恢复或加入等待队列
         """
@@ -570,12 +570,12 @@ class DownloadManager:
             if not task:
                 error_logger.error(f"恢复任务失败: 任务 {task_id} 不存在")
                 return False
-
+            
             # 只有暂停的任务才能恢复
             if task.status != TaskStatus.PAUSED.value:
                 download_logger.warning(f"任务 {task_id} 状态为 {task.status}，无法恢复")
                 return False
-
+                
             # 检查是否可以立即开始
             if len(self.active_tasks) < self.max_concurrent_downloads:
                 download_logger.info(f"尝试立即恢复任务: {task_id}")
@@ -619,17 +619,17 @@ class DownloadManager:
                         self.on_task_status_changed(task)
                     except Exception as cb_err:
                         error_logger.error(f"暂停任务切换到等待状态回调失败: {cb_err}")
-                        
+                    
                 download_logger.info(f"并发数已满，恢复的任务 {task_id} 添加到等待队列")
                 return True
-
+    
     def cancel_task(self, task_id: str) -> bool:
         """
         取消下载任务
         
         Args:
             task_id: 任务ID
-
+            
         Returns:
             bool: 是否成功取消
         """
@@ -638,19 +638,19 @@ class DownloadManager:
             if not task:
                 error_logger.error(f"取消任务失败: 任务 {task_id} 不存在")
                 return False
-
+                
             original_status = task.status
 
             # 调用 task.cancel() - this handles downloader cancellation and status update
             if task.cancel():
                 download_logger.info(f"取消下载任务: {task_id}")
-
+            
                 # 从活动或等待队列中移除
                 if task_id in self.active_tasks:
                     self.active_tasks.remove(task_id)
                 if task_id in self.waiting_queue:
                     self.waiting_queue.remove(task_id)
-
+                
                 # 如果任务之前是活动的，尝试启动下一个等待的任务
                 if original_status == TaskStatus.DOWNLOADING.value:
                     self._process_queue()
@@ -687,8 +687,8 @@ class DownloadManager:
                 return False
                 
             # 先尝试取消任务 (idempotent)
-            self.cancel_task(task_id)
-
+                self.cancel_task(task_id)
+                
             task = self.tasks.get(task_id) # Re-get task in case cancel_task modified it
 
             # 删除文件
@@ -699,7 +699,7 @@ class DownloadManager:
                         download_logger.info(f"删除文件: {task.file_path}")
                     except Exception as e:
                         error_logger.error(f"删除文件失败 {task.file_path}: {e}")
-
+                        
             # 移除任务引用
             if task_id in self.tasks:
                 del self.tasks[task_id]
@@ -710,7 +710,7 @@ class DownloadManager:
                 # 回调通知 (Consider if a specific 'removed' callback is needed)
                 # if self.on_task_removed:
                 #     self.on_task_removed(task_id)
-
+                
                 download_logger.info(f"移除下载任务引用: {task_id}")
             if delete_file:
                 task = self.tasks[task_id]
@@ -807,7 +807,7 @@ class DownloadManager:
             if len(self.active_tasks) >= self.max_concurrent_downloads:
                 download_logger.info("处理队列: 当前活动任务数已达最大值，无法启动新任务")
                 return
-
+                
             # 如果没有等待的任务，直接返回
             if not self.waiting_queue:
                 download_logger.info("处理队列: 没有等待中的任务")
@@ -853,7 +853,7 @@ class DownloadManager:
                 try:
                     # 先将状态更新为connecting
                     task.update_status(TaskStatus.CONNECTING.value)
-                    
+                        
                     # 启动下载
                     self._start_download_task(task)
                     tasks_started += 1
@@ -861,7 +861,7 @@ class DownloadManager:
                     # 通知状态变化
                     if self.on_task_status_changed:
                         self.on_task_status_changed(task)
-                        
+                            
                     download_logger.info(f"成功启动任务 {task_id}")
                 except Exception as e:
                     error_logger.error(f"启动任务 {task_id} 失败: {str(e)}")
@@ -974,7 +974,7 @@ class DownloadManager:
             error_logger.error(f"创建下载任务失败: {str(e)}")
             task.update_status(TaskStatus.ERROR.value, str(e))
             raise
-
+    
     def _on_progress_callback(self, task: DownloadTask):
         """下载进度回调"""
         # 节流控制，减少不必要的回调
@@ -1012,7 +1012,7 @@ class DownloadManager:
                      download_logger.warning(f"任务 {task.task_id} 完成但不在 active_tasks 列表中")
 
                 download_logger.info(f"下载任务完成: {task.task_id}")
-
+                
                 # 处理队列中的下一个任务
                 self._process_queue()
                 
@@ -1035,7 +1035,7 @@ class DownloadManager:
                     download_logger.warning(f"任务 {task.task_id} 出错但不在 active_tasks 列表中")
 
                 error_logger.error(f"下载任务错误: {task.task_id}, {error_msg}")
-
+                
                 # 处理队列中的下一个任务
                 self._process_queue()
                 

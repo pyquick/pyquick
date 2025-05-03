@@ -91,8 +91,8 @@ class DownloadSettingsPanel(BaseSettingsPanel):
         auto_retry_frame.pack(fill=tk.X, pady=5)
         
         auto_retry_check = ttk.Checkbutton(auto_retry_frame, text="下载失败后自动重试",
-                                         variable=self.auto_retry_var,
-                                         command=self._toggle_retry_count)
+                                     variable=self.auto_retry_var,
+                                     command=self._toggle_retry_count)
         auto_retry_check.pack(side=tk.LEFT, padx=5)
         
         # 重试次数

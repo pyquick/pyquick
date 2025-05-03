@@ -398,7 +398,7 @@ class PipManager:
         except Exception as e:
             logger.error(f"刷新数据失败: {str(e)}")
             self.status_var.set(f"刷新失败: {str(e)}")
-            
+        
     def _load_package_info(self):
         """加载已安装的包信息"""
         self.status_var.set("正在加载包信息...")
@@ -524,7 +524,7 @@ class PipManager:
             return sys.executable
         except Exception as e:
             logger.error(f"获取当前Python路径失败: {e}")
-            return sys.executable
+        return sys.executable
         
     def _show_context_menu(self, event):
         """显示右键菜单"""
@@ -1154,7 +1154,7 @@ class PipManager:
         except Exception as e:
             logger.error(f"获取主题颜色失败: {e}")
             return "black"
-
+        
     def get_frame(self):
         """返回设置框架"""
         return self.parent

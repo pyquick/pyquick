@@ -236,7 +236,7 @@ class SettingsManager:
         """
         if "." not in key:
             return self.settings.get(key, default)
-        
+    
         # 处理嵌套键
         keys = key.split(".")
         value = self.settings
