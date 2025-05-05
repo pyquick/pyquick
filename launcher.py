@@ -1,20 +1,24 @@
 from qfluentwidgets import NavigationItemPosition, FluentWindow, SubtitleLabel, setFont
 from qfluentwidgets import FluentIcon as FIF
 from la_souc import launch_in
-from PyQt6.QtWidgets import QFrame, QHBoxLayout, QApplication
-from PyQt6.QtGui import QIcon
-from PyQt6.QtCore import Qt
+from PySide6.QtWidgets import *
+from PySide6.QtGui import *
+from PySide6.QtCore import *
 import sys
+import os
+from settings.save import SettingsManager
 class Window(FluentWindow):
     """ 主界面 """
     def __init__(self):
         super().__init__()
 
-        # 创建子界面，实际使用时将 Widget 换成自己的子界面
+        # 初始化设置管理器
+        self.settings_manager = SettingsManager(os.path.dirname(os.path.abspath(__file__)))
+        self.settings_manager.load_settings()
 
+        # 创建子界面，实际使用时将 Widget 换成自己的子界面
         self.settingInterface = launch_in.pyquick_widget(self)
         self.albumInterface = launch_in.setting_widget(self)
-
 
         self.initNavigation()
         self.initWindow()

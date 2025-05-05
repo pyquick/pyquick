@@ -19,12 +19,18 @@ logger = logging.getLogger(__name__)
 class PythonManager:
     """Python安装管理类，负责查找和管理系统中的Python安装"""
     
-    def __init__(self):
-        """初始化Python管理器"""
+    def __init__(self, settings_manager=None):
+        """初始化Python管理器
+        
+        Args:
+            settings_manager: 设置管理器实例
+        """
         # Python安装列表
         self.python_installations = []
         # 默认Python安装
         self.default_installation = None
+        # 设置管理器
+        self.settings_manager = settings_manager
         # 初始化时加载Python安装
         self._load_python_installations()
         
@@ -43,6 +49,16 @@ class PythonManager:
                             if install.get('is_default', False):
                                 self.default_installation = install
                                 break
+            
+            # 添加系统Python到安装列表
+            sys_python = {
+                'name': '系统Python',
+                'version': sys.version.split()[0],
+                'path': sys.executable,
+                'is_default': False
+            }
+            if not any(install['path'] == sys.executable for install in self.python_installations):
+                self.python_installations.append(sys_python)
             
             # 如果没有加载到任何安装，或者没有默认安装，则尝试自动检测
             if not self.python_installations or not self.default_installation:
@@ -105,22 +121,51 @@ class PythonManager:
     def _detect_python_windows(self):
         """检测Windows系统上的Python安装"""
         try:
+            # 使用where命令查找PATH中的Python
+            try:
+                where_result = subprocess.run(
+                    ["where", "python"], 
+                    capture_output=True, 
+                    text=True, 
+                    check=False
+                )
+                if where_result.returncode == 0:
+                    for path in where_result.stdout.splitlines():
+                        path = path.strip()
+                        if path and os.path.exists(path):
+                            # 验证Python版本是否有效
+                            version_result = subprocess.run(
+                                [path, "--version"], 
+                                capture_output=True, 
+                                text=True, 
+                                check=False
+                            )
+                            if version_result.returncode == 0:
+                                self._add_python_installation(path)
+            except Exception as e:
+                logger.warning(f"使用where命令查找Python失败: {str(e)}")
+                
             # 常见的Python安装位置
             python_paths = [
                 r"C:\Python*",
                 r"C:\Program Files\Python*",
                 r"C:\Program Files (x86)\Python*",
-                r"%LOCALAPPDATA%\Programs\Python\Python*"
+                r"%LOCALAPPDATA%\Programs\Python\Python*",
+                r"%APPDATA%\Local\Programs\Python\Python*",
+                r"%USERPROFILE%\AppData\Local\Programs\Python\Python*",
+                r"%USERPROFILE%\scoop\apps\python\current\python.exe",
+                r"%USERPROFILE%\scoop\apps\python3\current\python.exe",
+                r"%USERPROFILE%\miniconda3\python.exe",
+                r"%USERPROFILE%\anaconda3\python.exe"
             ]
             
             # 将环境变量展开
             expanded_paths = []
             for path in python_paths:
-                if "%LOCALAPPDATA%" in path:
-                    local_appdata = os.environ.get("LOCALAPPDATA", "")
-                    if local_appdata:
-                        expanded_paths.append(path.replace("%LOCALAPPDATA%", local_appdata))
-                else:
+                path = path.replace("%LOCALAPPDATA%", os.environ.get("LOCALAPPDATA", ""))
+                path = path.replace("%APPDATA%", os.environ.get("APPDATA", ""))
+                path = path.replace("%USERPROFILE%", os.environ.get("USERPROFILE", ""))
+                if path:
                     expanded_paths.append(path)
             
             # 遍历每个可能的路径查找Python
@@ -141,6 +186,40 @@ class PythonManager:
                 python3_exe = os.path.join(path, "python3.exe")
                 if os.path.exists(python3_exe):
                     self._add_python_installation(python3_exe)
+            
+            # 查询注册表中的Python安装
+            try:
+                import winreg
+                # 获取注册表路径配置
+                registry_paths = [
+                    (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Python\PythonCore"),
+                    (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Python\PythonCore"),
+                    (winreg.HKEY_CURRENT_USER, r"SOFTWARE\Python\PythonCore")
+                ]
+                
+                # 如果提供了settings_manager，使用配置的注册表路径
+                if self.settings_manager:
+                    custom_paths = self.settings_manager.get("python_versions.windows_specific.registry_paths", [])
+                    for path in custom_paths:
+                        if path.startswith("HKEY_LOCAL_MACHINE\\"):
+                            registry_paths.append((winreg.HKEY_LOCAL_MACHINE, path[18:]))
+                        elif path.startswith("HKEY_CURRENT_USER\\"):
+                            registry_paths.append((winreg.HKEY_CURRENT_USER, path[17:]))
+                
+                # 检查注册表路径
+                for reg_key in registry_paths:
+                    try:
+                        with winreg.OpenKey(reg_key[0], reg_key[1]) as key:
+                            for i in range(0, winreg.QueryInfoKey(key)[0]):
+                                version_key_name = winreg.EnumKey(key, i)
+                                with winreg.OpenKey(key, version_key_name + "\\InstallPath") as install_key:
+                                    python_exe = os.path.join(winreg.QueryValue(install_key, ""), "python.exe")
+                                    if os.path.exists(python_exe):
+                                        self._add_python_installation(python_exe)
+                    except WindowsError:
+                        continue
+            except ImportError:
+                logger.warning("无法导入winreg模块，跳过注册表查询")
         
         except Exception as e:
             logger.error(f"检测Windows Python安装失败: {str(e)}")
@@ -162,7 +241,15 @@ class PythonManager:
             
             for python_path in locations:
                 if os.path.exists(python_path) and os.path.isfile(python_path):
-                    self._add_python_installation(python_path)
+                    # 验证Python版本是否有效
+                    version_result = subprocess.run(
+                        [python_path, "--version"], 
+                        capture_output=True, 
+                        text=True, 
+                        check=False
+                    )
+                    if version_result.returncode == 0:
+                        self._add_python_installation(python_path)
             
             # 尝试使用which命令查找
             try:
@@ -173,7 +260,16 @@ class PythonManager:
                     check=False
                 )
                 if which_python3.returncode == 0 and which_python3.stdout.strip():
-                    self._add_python_installation(which_python3.stdout.strip())
+                    path = which_python3.stdout.strip()
+                    # 验证Python版本是否有效
+                    version_result = subprocess.run(
+                        [path, "--version"], 
+                        capture_output=True, 
+                        text=True, 
+                        check=False
+                    )
+                    if version_result.returncode == 0:
+                        self._add_python_installation(path)
             except:
                 pass
             
@@ -373,6 +469,20 @@ class PythonManager:
                     
                     # 保存配置
                     self._save_python_installations()
+                    
+                    # 通知pip管理器更新显示
+                    try:
+                        from pipx.pip_manager import PipManager
+                        if hasattr(self, 'pip_manager'):
+                            self.pip_manager._update_python_environment_info()
+                    except ImportError:
+                        pass
+                    
+                    # 更新系统Python信息显示
+                    if self.settings_manager:
+                        self.settings_manager.set("python_versions.default_version", python_path)
+                        self.settings_manager.save_settings()
+                    
                     return True
             
             # 如果未找到指定的安装，则返回失败
@@ -445,4 +555,4 @@ class PythonManager:
             
         except Exception as e:
             logger.error(f"移除Python安装失败: {str(e)}")
-            return False 
+            return False

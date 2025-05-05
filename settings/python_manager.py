@@ -16,6 +16,8 @@ import threading
 import subprocess
 import platform
 from typing import Dict, Any, List, Optional, Tuple
+import winreg
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +51,12 @@ class PythonManager:
     def _load_python_installations(self):
         """加载已保存的Python安装信息"""
         try:
+            # 检查settings_manager是否存在
+            if self.settings_manager is None:
+                logger.warning("settings_manager为None，使用空列表作为默认值")
+                self.python_installations = []
+                return
+                
             installations = self.settings_manager.get("python.installations", [])
             
             # 确保installations是列表类型
@@ -94,6 +102,24 @@ class PythonManager:
             logger.error(f"保存Python安装信息失败: {str(e)}")
             return False
             
+    def get_default_python(self) -> Optional[Dict[str, Any]]:
+        """
+        获取标记为默认的Python安装信息
+        
+        Returns:
+            包含默认Python信息的字典，如果未找到则返回None
+        """
+        try:
+            for install in self.python_installations:
+                if install.get("is_default", False):
+                    logger.debug(f"找到默认Python环境: {install.get('path')}")
+                    return install
+            logger.warning("未找到标记为默认的Python环境")
+            return None
+        except Exception as e:
+            logger.error(f"获取默认Python环境时出错: {e}")
+            return None
+
     def _create_widgets(self):
         """创建设置界面组件"""
         # 当前Python信息
@@ -345,6 +371,116 @@ class PythonManager:
         # 提示用户重启应用以使用新版本
         messagebox.showinfo("提示", "默认Python版本已更改。请重启应用程序以使用新版本。")
         
+    def _get_python_installations_from_registry(self) -> List[Dict[str, str]]:
+        """
+        从Windows注册表读取Python安装信息
+
+        Returns:
+            包含Python安装信息的字典列表
+        """
+        installations = []
+        if platform.system() != "Windows":
+            return installations
+
+        # 获取注册表搜索路径 from settings_manager
+        registry_paths = self.settings_manager.get(
+            "python_versions.windows_specific.registry_paths",
+            [
+                "SOFTWARE\\Python\\PythonCore",
+                "SOFTWARE\\Wow6432Node\\Python\\PythonCore",
+            ]
+        )
+
+        for base_path in registry_paths:
+            try:
+                # 打开注册表项
+                # HKEY_CURRENT_USER
+                try:
+                    with winreg.OpenKey(winreg.HKEY_CURRENT_USER, base_path) as hkey:
+                        i = 0
+                        while True:
+                            try:
+                                # 枚举子项 (Python版本)
+                                version_key_name = winreg.EnumKey(hkey, i)
+                                version_path = f"{base_path}\\{version_key_name}"
+                                try:
+                                    # Open the version key
+                                    with winreg.OpenKey(hkey, version_path) as version_hkey:
+                                        # Try to read InstallPath
+                                        try:
+                                            install_path, _ = winreg.QueryValueEx(version_hkey, "InstallPath")
+                                            python_exe = os.path.join(install_path, "python.exe")
+                                            if os.path.exists(python_exe) and python_exe not in [inst['path'] for inst in installations]:
+                                                installations.append({"version": version_key_name, "path": python_exe, "is_default": False})
+                                                logger.debug(f"从注册表(HKCU)找到Python: {version_key_name} at {python_exe}")
+                                        except FileNotFoundError:
+                                             logger.warning(f"注册表路径 {version_path} 下的 InstallPath 不存在")
+                                        except Exception as e:
+                                            logger.error(f"读取注册表 InstallPath 失败 ({version_path}): {e}")
+                                except FileNotFoundError:
+                                    logger.warning(f"注册表路径 {version_path} 不存在")
+                                except Exception as e:
+                                    logger.error(f"打开注册表路径 {version_path} 失败: {e}")
+
+                                i += 1
+                            except OSError:
+                                # 没有更多子项
+                                break
+                            except Exception as e:
+                                logger.error(f"枚举注册表子项失败 ({base_path}, index {i}): {e}")
+                                i += 1 # 继续下一个子项
+
+                except FileNotFoundError:
+                    logger.debug(f"注册表路径 {base_path} (HKCU) 不存在")
+                except Exception as e:
+                    logger.error(f"访问注册表路径 {base_path} (HKCU) 失败: {e}")
+
+                # HKEY_LOCAL_MACHINE
+                try:
+                    with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, base_path) as hkey:
+                        i = 0
+                        while True:
+                            try:
+                                # 枚举子项 (Python版本)
+                                version_key_name = winreg.EnumKey(hkey, i)
+                                version_path = f"{base_path}\\{version_key_name}"
+                                try:
+                                    # Open the version key
+                                    with winreg.OpenKey(hkey, version_path) as version_hkey:
+                                        # Try to read InstallPath
+                                        try:
+                                            install_path, _ = winreg.QueryValueEx(version_hkey, "InstallPath")
+                                            python_exe = os.path.join(install_path, "python.exe")
+                                            if os.path.exists(python_exe) and python_exe not in [inst['path'] for inst in installations]:
+                                                installations.append({"version": version_key_name, "path": python_exe, "is_default": False})
+                                                logger.debug(f"从注册表(HKLM)找到Python: {version_key_name} at {python_exe}")
+                                        except FileNotFoundError:
+                                             logger.warning(f"注册表路径 {version_path} 下的 InstallPath 不存在")
+                                        except Exception as e:
+                                            logger.error(f"读取注册表 InstallPath 失败 ({version_path}): {e}")
+                                except FileNotFoundError:
+                                    logger.warning(f"注册表路径 {version_path} 不存在")
+                                except Exception as e:
+                                    logger.error(f"打开注册表路径 {version_path} 失败: {e}")
+
+                                i += 1
+                            except OSError:
+                                # 没有更多子项
+                                break
+                            except Exception as e:
+                                logger.error(f"枚举注册表子项失败 ({base_path}, index {i}): {e}")
+                                i += 1 # 继续下一个子项
+
+                except FileNotFoundError:
+                    logger.debug(f"注册表路径 {base_path} (HKLM) 不存在")
+                except Exception as e:
+                    logger.error(f"访问注册表路径 {base_path} (HKLM) 失败: {e}")
+
+            except Exception as e:
+                logger.error(f"处理注册表路径 {base_path} 时出错: {e}")
+
+        return installations
+
     def _auto_detect_python(self, tree):
         """自动检测系统中安装的Python版本"""
         # 创建进度窗口
@@ -371,7 +507,44 @@ class PythonManager:
         progress_bar.pack(fill=tk.X, padx=20)
         progress_bar.start(10)
         
-        # 在新线程中执行检测
+        # 首先检测系统默认Python
+        try:
+            default_python = sys.executable
+            if default_python and os.path.isfile(default_python):
+                # 获取版本信息
+                version_output = subprocess.check_output([default_python, "--version"], stderr=subprocess.STDOUT).decode().strip()
+                version_match = re.search(r"Python\s+(\d+\.\d+\.\d+)", version_output)
+                version = version_match.group(1) if version_match else "未知版本"
+                
+                # 获取更多详细信息
+                try:
+                    import sysconfig
+                    prefix = sysconfig.get_config_var('prefix')
+                    base_prefix = sysconfig.get_config_var('base_prefix')
+                    is_virtualenv = prefix != base_prefix
+                except Exception:
+                    is_virtualenv = False
+                
+                # 添加到安装列表
+                self.python_installations.append({
+                    "version": version,
+                    "path": default_python,
+                    "is_default": True,
+                    "is_system": True,
+                    "is_virtualenv": is_virtualenv,
+                    "prefix": prefix if 'prefix' in locals() else None,
+                    "base_prefix": base_prefix if 'base_prefix' in locals() else None
+                })
+                self._save_python_installations()
+                self._refresh_python_list(tree)
+                
+                # 更新UI显示
+                self._refresh_current_info()
+                
+        except Exception as e:
+            logger.error(f"检测系统默认Python失败: {str(e)}")
+        
+        # 在新线程中执行其他检测
         detection_thread = threading.Thread(
             target=lambda: self._perform_auto_detection(tree, progress_window, status_label),
             daemon=True
@@ -379,100 +552,159 @@ class PythonManager:
         detection_thread.start()
         
     def _perform_auto_detection(self, tree, progress_window, status_label):
-        """执行自动检测Python安装"""
+        """
+        执行自动检测Python安装
+        增加Windows注册表检测
+        """
         try:
-            # 可能的Python安装位置
+            status_label.config(text="正在从注册表检测Python安装...")
+            # 从注册表获取安装路径
+            registry_installations = self._get_python_installations_from_registry()
+
+            status_label.config(text="正在搜索常见目录中的Python安装...")
+            # 可能的Python安装位置 (文件系统)
             search_paths = []
-            
+
             if platform.system() == "Windows":
-                program_files = os.environ.get("ProgramFiles", r"C:\Program Files")
-                program_files_x86 = os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")
-                
-                search_paths.extend([
-                    program_files + r"\Python*",
-                    program_files_x86 + r"\Python*",
-                    os.path.expanduser("~") + r"\AppData\Local\Programs\Python\Python*"
-                ])
+                # 获取常见路径 from settings_manager
+                common_paths = self.settings_manager.get(
+                    "python_versions.windows_specific.common_paths",
+                    [
+                        "C:\\Python*",
+                        "%USERPROFILE%\\AppData\\Local\\Programs\\Python\\Python*",
+                        "%USERPROFILE%\\scoop\\apps\\python\\current\\python.exe",
+                        "%USERPROFILE%\\miniconda3\\python.exe",
+                        "%USERPROFILE%\\anaconda3\\python.exe"
+                    ]
+                )
+                for path in common_paths:
+                     search_paths.append(os.path.expandvars(path))
+
             else:  # Unix-like systems
                 search_paths.extend([
                     "/usr/bin/python*",
                     "/usr/local/bin/python*",
                     os.path.expanduser("~") + "/.pyenv/versions/*/bin/python*"
                 ])
-                
-            # 收集所有可能的Python路径
-            python_paths = []
+
+            # 收集所有可能的Python路径 (文件系统)
+            file_system_paths = []
             for path_pattern in search_paths:
                 import glob
-                python_paths.extend(glob.glob(path_pattern))
-                
+                file_system_paths.extend(glob.glob(path_pattern))
+
+            # 合并注册表和文件系统找到的路径，并去重
+            all_potential_paths = list(set([inst['path'] for inst in registry_installations] + file_system_paths))
+
             # 过滤并验证Python安装
             new_installations = []
-            for path in python_paths:
+            total_paths = len(all_potential_paths)
+            for i, path in enumerate(all_potential_paths):
+                status_label.config(text=f"正在验证 {path} ({i+1}/{total_paths})...")
+                progress_window.update()
                 try:
                     # 跳过已知的安装
                     if any(install["path"] == path for install in self.python_installations):
+                        logger.debug(f"跳过已知的Python安装: {path}")
                         continue
-                        
+
+                    # 检查路径是否存在且是文件
+                    if not os.path.isfile(path):
+                         logger.debug(f"路径不是文件或不存在: {path}")
+                         continue
+
                     # 获取版本信息
-                    result = subprocess.run(
-                        [path, "--version"],
-                        capture_output=True,
-                        text=True,
-                        check=True
-                    )
-                    version = result.stdout.strip().split()[1]
+                    # 检查文件名是否包含 'python' 且是可执行文件 (简单判断)
+                    if "python" in os.path.basename(path).lower():
+                         # 尝试运行获取版本
+                         try:
+                            # 使用适当的启动方法防止窗口弹出 (subprocess.STARTUPINFO on Windows)
+                            startupinfo = None
+                            if platform.system() == "Windows":
+                                startupinfo = subprocess.STARTUPINFO()
+                                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                                startupinfo.wShowWindow = subprocess.SW_HIDE # 隐藏窗口
+
+                            result = subprocess.run(
+                                [path, "--version"],
+                                capture_output=True,
+                                text=True, # Capture output as text
+                                check=True, # Raise exception for non-zero exit codes
+                                encoding='utf-8', # Ensure correct encoding
+                                startupinfo=startupinfo # Use startupinfo on Windows
+                            )
+                            # 提取版本号，可能在stdout或stderr
+                            version_output = result.stdout.strip() if result.stdout else result.stderr.strip()
+                            version_match = re.search(r"Python\s+(\d+\.\d+\.\d+)", version_output)
+                            if version_match:
+                                version = version_match.group(1)
+                            else:
+                                logger.warning(f"无法从输出中提取版本号: {version_output}")
+                                version = "未知版本"
+
+                            # 添加到新发现列表
+                            new_installations.append({
+                                "version": version,
+                                "path": path,
+                                "is_default": False
+                            })
+                            logger.debug(f"成功验证Python安装: {version} at {path}")
+                         except FileNotFoundError:
+                            logger.warning(f"Python可执行文件未找到: {path}")
+                            continue
+                         except subprocess.CalledProcessError as e:
+                             logger.warning(f"运行 {path} --version 失败 (exit code {e.returncode}): {e.stdout} {e.stderr}")
+                             continue
+                         except Exception as e:
+                            logger.error(f"验证Python安装 {path} 失败: {e}")
+                            continue
+                    else:
+                        logger.debug(f"跳过非Python可执行文件: {path}")
+                except Exception as e:
+                        logger.error(f"验证Python安装 {path} 失败: {e}")
+                        continue
                     
-                    # 添加到新发现列表
-                    new_installations.append({
-                        "version": version,
-                        "path": path,
-                        "is_default": False
-                    })
-                    
-                except Exception:
-                    continue
-                    
+
+
             def process_results():
                 # 添加新发现的安装
+                added_count = 0
                 for install in new_installations:
-                    # 再次检查是否已存在
+                    # 再次检查是否已存在 (防止多线程或异步问题)
                     if not any(existing["path"] == install["path"]
                              for existing in self.python_installations):
                         # 如果是第一个安装则设为默认
                         if not self.python_installations:
                             install["is_default"] = True
-                            
+
                         self.python_installations.append(install)
-                        
-                    self._save_python_installations()
-                    self._refresh_python_list(tree)
-                    messagebox.showinfo("检测结果", f"已添加{len(new_installations)}个新的Python安装")
-                    
+                        added_count += 1
+
+                self._save_python_installations()
+                self._refresh_python_list(tree)
+
                 # 关闭进度窗口
                 if progress_window.winfo_exists():
                     progress_window.destroy()
-                    
+
+                if added_count > 0:
+                    messagebox.showinfo("检测结果", f"已添加{added_count}个新的Python安装")
+                else:
+                     messagebox.showinfo("检测结果", "未发现新的Python安装")
+
             # 在主线程中更新UI
             self.parent.after(0, process_results)
-            
+
         except Exception as e:
             logger.error(f"自动检测Python安装失败: {str(e)}")
-            
+
             def show_error():
                 if progress_window.winfo_exists():
                     progress_window.destroy()
                 messagebox.showerror("错误", f"检测Python安装时出错: {str(e)}")
-                
+
             self.parent.after(0, show_error)
             
-    def get_default_python(self) -> Optional[Dict[str, Any]]:
-        """获取默认Python安装信息"""
-        for install in self.python_installations:
-            if install.get("is_default", False):
-                return install
-        return None
-        
     def get_frame(self):
         """返回设置框架"""
         return self.frame

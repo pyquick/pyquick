@@ -32,6 +32,8 @@ class PythonSettingsPanel(BaseSettingsPanel):
         
         # 调用父类初始化方法
         super().__init__(parent, settings_manager, theme_manager)
+        self.setup_ui()
+        self.load_settings()
     
     def setup_ui(self):
         """设置Python版本管理面板的用户界面"""
@@ -103,9 +105,29 @@ class PythonSettingsPanel(BaseSettingsPanel):
     
     def _add_python(self):
         """添加Python安装"""
-        if sys.platform == 'darwin':  # macOS
+        # 首先尝试自动添加系统Python
+        system_python = sys.executable
+        if system_python and system_python not in [i["path"] for i in self.installations]:
+            if self._is_valid_python(system_python):
+                python_version = self._get_python_version(system_python)
+                if python_version:
+                    name = f"系统Python {python_version}"
+                    new_installation = {
+                        "name": name,
+                        "version": python_version,
+                        "path": system_python,
+                        "default": len(self.installations) == 0
+                    }
+                    self.installations.append(new_installation)
+                    self._update_python_list()
+                    if len(self.installations) == 1:
+                        self.default_version_var.set(name)
+                    return
+        
+        
+        if sys.platform == 'darwin':  
             filetypes = [("Python", "python*"), ("Python应用", "*.app"), ("所有文件", "*")]
-        else:  # Windows或Linux
+        else:  
             filetypes = [("Python可执行文件", "python*"), ("所有文件", "*")]
         
         python_path = filedialog.askopenfilename(
@@ -186,6 +208,11 @@ class PythonSettingsPanel(BaseSettingsPanel):
         
         # 获取选中项的索引
         index = self.version_tree.index(selected_item[0])
+        
+        # 检查索引是否有效
+        if index < 0 or index >= len(self.installations):
+            messagebox.showerror("错误", "无效的Python安装索引")
+            return
         
         # 取消原默认设置
         for installation in self.installations:
@@ -270,6 +297,21 @@ class PythonSettingsPanel(BaseSettingsPanel):
                 installation["version"],
                 installation["path"],
                 default_mark
+            ))
+            
+        # 添加系统Python到列表（如果不存在）
+        sys_python = {
+            "name": "系统Python",
+            "version": sys.version.split()[0],
+            "path": sys.executable,
+            "default": False
+        }
+        if not any(install["path"] == sys.executable for install in self.installations):
+            self.version_tree.insert("", "end", values=(
+                sys_python["name"],
+                sys_python["version"],
+                sys_python["path"],
+                ""
             ))
     
     def _detect_python_installations(self):
@@ -529,4 +571,4 @@ class PythonSettingsPanel(BaseSettingsPanel):
             return True
         except Exception as e:
             logging.error(f"保存Python版本设置时出错: {e}")
-            return False 
+            return False

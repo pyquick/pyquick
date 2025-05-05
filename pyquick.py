@@ -6,6 +6,7 @@ PyQuick主程序
 Python下载器和包管理工具
 """
 
+from ast import Import
 import os
 import re
 import sys
@@ -26,6 +27,8 @@ import tkinter as tk
 from tkinter import filedialog, messagebox
 import ttkbootstrap as ttk
 from ttkbootstrap.constants import *
+
+from settings.save import SettingsManager
 
 # 添加全局UI组件变量
 version_combobox = None
@@ -58,6 +61,7 @@ import importlib
 # 导入内部模块
 try:
     from log import app_logger, error_logger, configure_global_loggers
+    from disk_info import DiskInfoMonitor  # 导入磁盘信息监控模块
 except ImportError:
     # 创建默认的logger
     app_logger = logging.getLogger("app")
@@ -65,6 +69,16 @@ except ImportError:
     
     def configure_global_loggers(**kwargs):
         pass
+
+# 初始化磁盘信息监控
+def init_disk_monitor():
+    """初始化磁盘信息监控并记录日志"""
+    try:
+        disk_monitor = DiskInfoMonitor()
+        disk_monitor.start_monitoring()
+        app_logger.info("磁盘信息监控模块已启动")
+    except Exception as e:
+        error_logger.error(f"启动磁盘信息监控失败: {str(e)}")
 
 # 禁用警告
 requests.packages.urllib3.disable_warnings()
@@ -179,6 +193,14 @@ def update_debug_mode_from_settings():
 
 # 解析命令行参数
 parse_args()
+
+# 初始化磁盘监控
+init_disk_monitor()
+
+# 扫描并更新Python安装信息
+from settings.save import SettingsManager
+SettingsManager(config_path).update_python_installations()
+
 
 # 导入新的日志系统
 try:
@@ -350,9 +372,9 @@ def python_version_reload():
     """重新加载Python版本列表"""
     def thread():
         try:
+            version_reload.config(text="刷新版本列表中...", state="disabled")
             response = requests.get("https://www.python.org/ftp/python/", timeout=10)
             response.raise_for_status()
-            
             bs = BeautifulSoup(response.content, "lxml")
             r1 = r'\d+\.\d+\.\d+/$'
             results = []
@@ -1652,7 +1674,8 @@ def pause_download():
         messagebox.showerror("错误", f"暂停下载失败: {e}")
 
 def show_about():
-    messagebox.showinfo("About", f"Version: dev\nBuild: 1962\n10086 days left.")
+    """显示关于信息"""
+    messagebox.showinfo("关于 PyQuick", f"PyQuick v{version}\n\nPython下载器和包管理工具")
 
 def on_closing():
     """安全关闭程序，清理资源，终止线程和进程"""
@@ -2098,7 +2121,7 @@ if __name__ == "__main__":
         """设置窗口图标"""
         try:
             # 检查图标文件是否存在
-            icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pyquick.icns")
+            icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pyquick.ico")
             if os.path.exists(icon_path):
                 # 不同平台使用不同的图标设置方法
                 if platform.system() == "Windows":
@@ -2162,7 +2185,13 @@ if __name__ == "__main__":
                               activebackground=menu_active_bg, activeforeground=menu_active_fg)
             help_menu.add_command(label="关于", command=show_about)
             menubar.add_cascade(label="帮助", menu=help_menu)
-            
+
+            # Add Debug Info menu item if in debug mode
+            global DEBUG_MODE
+            from debug_info import ui
+            if DEBUG_MODE:
+                help_menu.add_command(label="调试信息", command=lambda: ui.DebugInfoWindow().mainloop())
+
             # 将菜单栏添加到root窗口
             root.config(menu=menubar)
             
@@ -2173,22 +2202,24 @@ if __name__ == "__main__":
         
         # 创建标签页控件
         tab_control = ttk.Notebook(root)
+        tab_control.configure()
         
         # 创建下载标签页
-        download_tab = ttk.Frame(tab_control)
+        download_tab = ttk.Frame(tab_control, padding=10)
         tab_control.add(download_tab, text="Python下载")
         
-        # 创建PIP管理标签页
-        pip_tab = ttk.Frame(tab_control)
-        tab_control.add(pip_tab, text="PIP管理")
+        # 创建PIP管理标签页并移至右侧
+        pip_tab = ttk.Frame(tab_control, padding=10)
+        tab_control.insert("end", pip_tab, text="PIP管理")
+        tab_control.select(pip_tab)
         
         # 添加标签页到窗口
         tab_control.pack(expand=1, fill="both")
         
         # 在下载标签页中创建组件
         # 版本选择框架
-        version_frame = ttk.LabelFrame(download_tab, text="Python版本选择", bootstyle=PRIMARY)
-        version_frame.pack(fill="x", padx=10, pady=5)
+        version_frame = ttk.LabelFrame(download_tab, text="Python版本选择", padding=10)
+        version_frame.pack(fill="x", padx=15, pady=10)
         
         # 版本选择标签和下拉框
         ttk.Label(version_frame, text="选择版本:").grid(row=0, column=0, padx=5, pady=5, sticky="w")
@@ -2200,8 +2231,8 @@ if __name__ == "__main__":
         version_reload.grid(row=0, column=2, padx=5, pady=5, sticky="w")
         
         # 文件选择框架
-        file_frame = ttk.LabelFrame(download_tab, text="文件选择", bootstyle=PRIMARY)
-        file_frame.pack(fill="x", padx=10, pady=5)
+        file_frame = ttk.LabelFrame(download_tab, text="文件选择", padding=10)
+        file_frame.pack(fill="x", padx=15, pady=10)
         
         # 文件选择下拉框
         ttk.Label(file_frame, text="选择文件:").grid(row=0, column=0, padx=5, pady=5, sticky="w")
@@ -2209,8 +2240,8 @@ if __name__ == "__main__":
         choose_file_combobox.grid(row=0, column=1, padx=5, pady=5, sticky="w")
         
         # 目标路径框架
-        dest_frame = ttk.LabelFrame(download_tab, text="目标路径", bootstyle=PRIMARY)
-        dest_frame.pack(fill="x", padx=10, pady=5)
+        dest_frame = ttk.LabelFrame(download_tab, text="目标路径", padding=10)
+        dest_frame.pack(fill="x", padx=15, pady=10)
         
         # 目标路径输入框和浏览按钮
         ttk.Label(dest_frame, text="保存到:").grid(row=0, column=0, padx=5, pady=5, sticky="w")
@@ -2222,8 +2253,8 @@ if __name__ == "__main__":
         browse_button.grid(row=0, column=2, padx=5, pady=5)
         
         # 下载设置框架
-        settings_frame = ttk.LabelFrame(download_tab, text="下载设置", bootstyle=PRIMARY)
-        settings_frame.pack(fill="x", padx=10, pady=5)
+        settings_frame = ttk.LabelFrame(download_tab, text="下载设置", padding=10)
+        settings_frame.pack(fill="x", padx=15, pady=10)
         
         # 线程数设置
         ttk.Label(settings_frame, text="线程数:").grid(row=0, column=0, padx=5, pady=5, sticky="w")
@@ -2232,8 +2263,8 @@ if __name__ == "__main__":
         threads_entry.grid(row=0, column=1, padx=5, pady=5, sticky="w")
         
         # 下载控制框架
-        control_frame = ttk.Frame(download_tab)
-        control_frame.pack(fill="x", padx=10, pady=5)
+        control_frame = ttk.Frame(download_tab, padding=10)
+        control_frame.pack(fill="x", padx=15, pady=10)
         
         # 下载按钮
         download_button = ttk.Button(control_frame, text="下载", command=download_selected_version, bootstyle=SUCCESS)
@@ -2252,8 +2283,8 @@ if __name__ == "__main__":
         cancel_button.grid(row=0, column=3, padx=5, pady=5)
         
         # 状态框架
-        status_frame = ttk.LabelFrame(download_tab, text="下载状态", bootstyle=PRIMARY)
-        status_frame.pack(fill="x", padx=10, pady=5)
+        status_frame = ttk.LabelFrame(download_tab, text="下载状态", padding=10)
+        status_frame.pack(fill="x", padx=15, pady=10)
         
         # 进度条
         ttk.Label(status_frame, text="进度:").grid(row=0, column=0, padx=5, pady=5, sticky="w")
@@ -2320,10 +2351,11 @@ if __name__ == "__main__":
             if 'settings_mgr' in globals() and settings_mgr:
                 # 加载上次下载目录
                 try:
-                    last_dir_config = settings_mgr.get("last_download_directory", "")
-                    if last_dir_config and os.path.exists(last_dir_config):
+                    # Load the default download path from settings
+                    default_download_path = settings_mgr.get("download.default_path", "")
+                    if default_download_path and os.path.exists(default_download_path):
                         destination_entry.delete(0, tk.END)
-                        destination_entry.insert(0, last_dir_config)
+                        destination_entry.insert(0, default_download_path)
                 except Exception as e:
                     error_logger.error(f"加载下载目录失败: {e}")
             
@@ -2488,7 +2520,12 @@ def create_ui(root):
                           activebackground=menu_active_bg, activeforeground=menu_active_fg)
         help_menu.add_command(label="关于", command=show_about)
         menubar.add_cascade(label="帮助", menu=help_menu)
-        
+
+        # Add Debug Info menu item if in debug mode
+        global DEBUG_MODE
+        if DEBUG_MODE:
+            help_menu.add_command(label="调试信息", command=lambda: show_debug_info())
+
         # 将菜单栏添加到root窗口
         root.config(menu=menubar)
         
@@ -2646,10 +2683,11 @@ def create_ui(root):
         if 'settings_mgr' in globals() and settings_mgr:
             # 加载上次下载目录
             try:
-                last_dir_config = settings_mgr.get("last_download_directory", "")
-                if last_dir_config and os.path.exists(last_dir_config):
+                # Load the default download path from settings
+                default_download_path = settings_mgr.get("download.default_path", "")
+                if default_download_path and os.path.exists(default_download_path):
                     destination_entry.delete(0, tk.END)
-                    destination_entry.insert(0, last_dir_config)
+                    destination_entry.insert(0, default_download_path)
             except Exception as e:
                 error_logger.error(f"加载下载目录失败: {e}")
         
@@ -2683,3 +2721,26 @@ def init_pip_manager(parent=None):
     except Exception as e:
         error_logger.error(f"初始化PIP管理器失败: {e}")
         return None
+
+def show_debug_info():
+    """显示调试信息"""
+    debug_window = tk.Toplevel()
+    debug_window.title("调试信息")
+    debug_window.geometry("600x400")
+    
+    text = tk.Text(debug_window, wrap=tk.WORD)
+    scrollbar = ttk.Scrollbar(debug_window, command=text.yview)
+    text.configure(yscrollcommand=scrollbar.set)
+    
+    scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+    text.pack(expand=True, fill=tk.BOTH)
+    
+    # Add debug information
+    text.insert(tk.END, f"PyQuick 版本: {version}\n")
+    text.insert(tk.END, f"Python 版本: {sys.version}\n")
+    text.insert(tk.END, f"操作系统: {platform.platform()}\n")
+    text.insert(tk.END, f"调试模式: {'启用' if DEBUG_MODE else '禁用'}\n")
+    text.insert(tk.END, f"配置文件路径: {config_path}\n")
+    
+    # Make text read-only
+    text.config(state=tk.DISABLED)

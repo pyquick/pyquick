@@ -29,11 +29,11 @@ class BaseSettingsPanel(ttk.Frame):
         # 创建带滚动条的主容器
         self.create_scrollable_frame()
         
-        # 设置UI
-        self.setup_ui()
-        
-        # 加载设置
-        self.load_settings()
+        # 设置UI 和 加载设置 的调用已从此移除
+       #self.setup_ui()
+       #self.load_settings()
+        # 子类应在其 __init__ 中完成自身属性初始化后调用这些方法
+       
     
     def setup_ui(self):
         """
@@ -279,4 +279,4 @@ class BaseSettingsPanel(ttk.Frame):
         """
         # 默认实现总是返回True
         # 子类应该根据需要重写此方法
-        return True 
+        return True

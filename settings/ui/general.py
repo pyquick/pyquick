@@ -31,6 +31,8 @@ class GeneralSettingsPanel(BaseSettingsPanel):
         
         # 调用父类初始化方法
         super().__init__(parent, settings_manager, theme_manager)
+        self.setup_ui()
+        self.load_settings()
     
     def setup_ui(self):
         """设置通用设置面板的用户界面"""

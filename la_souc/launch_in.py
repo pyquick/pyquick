@@ -1,6 +1,6 @@
 from qfluentwidgets import  SubtitleLabel, setFont,PushButton
-from PyQt6.QtWidgets import QFrame, QHBoxLayout
-from PyQt6.QtCore import Qt
+from PySide6.QtWidgets import QFrame, QHBoxLayout
+from PySide6.QtCore import Qt
 class pyquick_widget(QFrame):
     def __init__(self, text: str, parent=None):
         super().__init__(parent=parent)

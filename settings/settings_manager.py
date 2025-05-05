@@ -78,7 +78,20 @@ class SettingsManager:
             # Python版本管理
             "python_versions": {
                 "installations": [],  # 确保这是一个空列表
-                "default_version": ""
+                "default_version": "",
+                "windows_specific": {  # Windows平台特有设置
+                    "registry_paths": [  # Windows注册表路径
+                        "SOFTWARE\\Python\\PythonCore",
+                        "SOFTWARE\\Wow6432Node\\Python\\PythonCore"
+                    ],
+                    "common_paths": [  # 常见安装路径
+                        "C:\\Python*",
+                        "%USERPROFILE%\\AppData\\Local\\Programs\\Python\\Python*",
+                        "%USERPROFILE%\\scoop\\apps\\python\\current\\python.exe",
+                        "%USERPROFILE%\\miniconda3\\python.exe",
+                        "%USERPROFILE%\\anaconda3\\python.exe"
+                    ]
+                }
             },
             
             # Python安装信息 (兼容旧版设置)
@@ -101,6 +114,30 @@ class SettingsManager:
                 "last_check": "",
                 "available_version": "",
                 "check_interval": 7  # 天
+            },
+            
+            # 网络测试设置
+            "net_test": {
+                "servers": [
+                    {"name": "百度", "url": "https://www.baidu.com"},
+                    {"name": "阿里云", "url": "https://www.aliyun.com"},
+                    {"name": "腾讯云", "url": "https://cloud.tencent.com"},
+                    {"name": "PyPI", "url": "https://pypi.org"}
+                ],
+                "last_test": None,  # 上次测试时间
+                "last_result": {}   # 上次测试结果
+            },
+            
+            # 镜像服务器设置
+            "mirror": {
+                "sources": [
+                    {"name": "官方源", "url": "https://pypi.org/simple"},
+                    {"name": "清华源", "url": "https://pypi.tuna.tsinghua.edu.cn/simple"},
+                    {"name": "阿里云", "url": "https://mirrors.aliyun.com/pypi/simple"},
+                    {"name": "豆瓣", "url": "https://pypi.douban.com/simple"}
+                ],
+                "selected": "官方源",  # 当前选择的镜像源
+                "last_checked": None  # 上次检查时间
             }
         }
     
@@ -121,6 +158,18 @@ class SettingsManager:
         except Exception as e:
             logger.error(f"加载设置失败: {e}")
     
+    def get_default_python_version(self) -> str:
+        """
+        获取默认Python版本
+        
+        Returns:
+            str: 默认Python版本路径
+        """
+        try:
+            return self.settings["python_versions"]["default_version"]
+        except KeyError:
+            return ""
+            
     def _merge_settings(self, user_settings: Dict[str, Any], target: Dict[str, Any] = None, path: str = "") -> None:
         """
         递归合并用户设置到默认设置

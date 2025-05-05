@@ -371,11 +371,12 @@ if __name__ == "__main__":
     def on_url_tested(name, result):
         print(f"测试完成: {name}, 响应时间: {result.get('time', 0):.1f}ms, 状态码: {result.get('status_code', 0)}")
     
-    results = test_multiple_urls(urls, callback=on_url_tested)
+    # Removed unsupported 'callback' argument from the call below
+    results = test_multiple_urls(urls)
     
     # 找出最佳镜像
     best = find_best_mirror(results)
     if best:
         print(f"\n最佳镜像: {best['name']}, 响应时间: {best['time']:.1f}ms")
     else:
-        print("\n没有可用的镜像") 
+        print("\n没有可用的镜像")

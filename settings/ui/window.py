@@ -21,12 +21,27 @@ class SettingsWindow:
     """设置窗口类，管理所有设置面板"""
 
     def __init__(self, parent, settings_manager):
-        self.parent = parent
-        self.settings_manager = settings_manager
-        self.panels = []  # 存储所有设置面板
-        
-        # 创建设置窗口
-        self.window = tk.Toplevel(parent)
+        try:
+            if not parent or not settings_manager:
+                raise ValueError("parent和settings_manager参数不能为None")
+                
+            self.parent = parent
+            self.settings_manager = settings_manager
+            self.panels = []  # 存储所有设置面板
+            
+            # 验证settings_manager是否包含必要方法
+            if not hasattr(settings_manager, 'save_settings'):
+                raise AttributeError("settings_manager缺少必要方法")
+            
+            # 创建设置窗口
+            self.window = tk.Toplevel(parent)
+            if not self.window:
+                raise RuntimeError("无法创建设置窗口")
+            
+        except Exception as e:
+            logger.error(f"初始化SettingsWindow失败: {e}")
+            messagebox.showerror("错误", f"初始化设置窗口失败: {e}")
+            return
         self.window.title("设置")
         self.window.transient(parent)
         self.window.grab_set()
@@ -63,13 +78,17 @@ class SettingsWindow:
         
     def _create_ui(self):
         """创建设置界面"""
+        logger.debug("开始创建设置界面")
+        
         # 创建主框架
         main_frame = ttk.Frame(self.window, padding="10")
         main_frame.pack(fill=tk.BOTH, expand=True)
+        logger.debug("主框架创建完成")
         
         # 创建选项卡控件
         tab_control = ttk.Notebook(main_frame)
         tab_control.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        logger.debug("选项卡控件创建完成")
         
         # 创建各个设置面板
         try:

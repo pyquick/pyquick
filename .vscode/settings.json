@@ -49,5 +49,6 @@
         "print": "cpp",
         "streambuf": "cpp",
         "variant": "cpp"
-    }
+    },
+    "workbench.activityBar.orientation": "vertical"
 }

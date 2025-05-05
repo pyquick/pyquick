@@ -21,17 +21,29 @@ class DebugInfoWindow(tk.Toplevel):
     _initialized = False
     
     @staticmethod
-    def should_show_menu(debug_mode=False):
+    def should_show_menu(debug_mode=False, settings_manager=None):
         """
         判断是否应显示调试信息菜单项
         
         Args:
-            debug_mode: 是否处于调试模式
-        
+            debug_mode: 直接传入的调试模式标志
+            settings_manager: 设置管理器实例
+            
         Returns:
             bool: 是否应显示菜单项
         """
-        return debug_mode
+        # 优先使用直接传入的debug_mode
+        if debug_mode:
+            return True
+            
+        # 如果没有直接传入debug_mode，尝试从settings_manager获取
+        if settings_manager:
+            try:
+                return settings_manager.get("advanced.debug_mode", False)
+            except:
+                pass
+                
+        return False
     
     def __new__(cls, *args, **kwargs):
         """单例模式实现"""
@@ -39,13 +51,14 @@ class DebugInfoWindow(tk.Toplevel):
             cls._instance = super().__new__(cls)
         return cls._instance
         
-    def __init__(self, lazy_load=True, debug_mode=False):
+    def __init__(self, lazy_load=True, debug_mode=False, settings_manager=None):
         """
         初始化调试信息窗口
 
         Args:
             lazy_load: 是否延迟加载内容（提高启动性能）
-            debug_mode: 是否处于调试模式
+            debug_mode: 直接传入的调试模式标志
+            settings_manager: 设置管理器实例
         """
         if DebugInfoWindow._initialized:
             # 如果已经初始化过，仅确保窗口显示
@@ -57,7 +70,8 @@ class DebugInfoWindow(tk.Toplevel):
         DebugInfoWindow._initialized = True
         
         # 调试模式标志
-        self.debug_mode = debug_mode
+        self.debug_mode = debug_mode or (settings_manager and 
+                                       settings_manager.get("advanced.debug_mode", False))
 
         # 基本窗口配置
         self.title("系统调试信息")
@@ -279,19 +293,45 @@ class DebugInfoWindow(tk.Toplevel):
             label.grid(row=i, column=0, sticky='w', pady=2)
 
     def create_disk_section(self):
-        """创建磁盘信息部分"""
-        # 磁盘信息大框架
-        self.disk_main_frame = ttk.LabelFrame(self.scrollable_frame, text="磁盘信息", padding="10")
-        self.disk_main_frame.grid(row=3, column=0, sticky='ew', padx=5, pady=5)
-        self.disk_main_frame.grid_columnconfigure(0, weight=1)
-
-        # 磁盘信息分组
-        self.disk_group = ttk.Frame(self.disk_main_frame)
-        self.disk_group.grid(row=0, column=0, sticky='ew')
-        self.disk_group.grid_columnconfigure(0, weight=1)
-
-        self.disk_labels = {}
-        self.disk_progressbars = {}
+        """创建磁盘信息区域"""
+        disk_frame = ttk.LabelFrame(self.scrollable_frame, text="磁盘信息", padding="5")
+        disk_frame.grid(row=3, column=0, sticky="ew", pady=5)
+        disk_frame.grid_columnconfigure(0, weight=1)
+        
+        # 创建磁盘信息表格
+        self.disk_tree = ttk.Treeview(disk_frame, columns=("mount", "total", "used", "free", "percent", "fstype"), show="headings")
+        self.disk_tree.heading("mount", text="挂载点")
+        self.disk_tree.heading("total", text="总空间")
+        self.disk_tree.heading("used", text="已用")
+        self.disk_tree.heading("free", text="可用")
+        self.disk_tree.heading("percent", text="使用率")
+        self.disk_tree.heading("fstype", text="文件系统")
+        
+        # 设置列宽
+        self.disk_tree.column("mount", width=120)
+        self.disk_tree.column("total", width=80)
+        self.disk_tree.column("used", width=80)
+        self.disk_tree.column("free", width=80)
+        self.disk_tree.column("percent", width=80)
+        self.disk_tree.column("fstype", width=100)
+        
+        # 添加滚动条
+        scrollbar = ttk.Scrollbar(disk_frame, orient="vertical", command=self.disk_tree.yview)
+        self.disk_tree.configure(yscrollcommand=scrollbar.set)
+        
+        # 布局
+        self.disk_tree.grid(row=0, column=0, sticky="nsew")
+        scrollbar.grid(row=0, column=1, sticky="ns")
+        
+        disk_frame.grid_rowconfigure(0, weight=1)
+        
+        # 添加权限检查按钮
+        self.check_perms_btn = ttk.Button(disk_frame, text="检查权限", command=self.check_disk_permissions)
+        self.check_perms_btn.grid(row=1, column=0, pady=(5, 0))
+        
+        # 添加错误信息显示标签
+        self.error_label = ttk.Label(disk_frame, text="", style="Info.TLabel")
+        self.error_label.grid(row=2, column=0, columnspan=2, pady=5, sticky="ew")
 
     def initialize_log_tab(self):
         """初始化日志标签页内容"""
@@ -586,40 +626,52 @@ class DebugInfoWindow(tk.Toplevel):
         self.process_progressbar['value'] = process_usage_percent
             
     def update_disk_info(self):
-        """单独更新磁盘信息（I/O密集，降低频率）"""
-        # Corrected In  dentation
-        system_data = get_system_info()
+        """更新磁盘信息"""
+        self.disk_counter += 1
+        
+        # 只有达到更新间隔时才更新磁盘信息
+        if self.disk_counter >= self.disk_update_interval:
+            self.disk_counter = 0
             
-            # 更新磁盘信息
-        for i, (mountpoint, info) in enumerate(system_data['磁盘使用'].items()):
-            # Corrected Indentation
-            if mountpoint not in self.disk_labels:
-                # 创建新的磁盘行 (Corrected Indentation)
-                disk_frame = ttk.Frame(self.disk_group)
-                disk_frame.grid(row=i, column=0, sticky='ew', padx=5, pady=2)
-                disk_frame.grid_columnconfigure(0, weight=1)
+            # 清空现有数据
+            for item in self.disk_tree.get_children():
+                self.disk_tree.delete(item)
+            
+            try:
+                # 获取磁盘信息
+                disk_info = get_disk_info()
                 
-                self.disk_labels[mountpoint] = ttk.Label(disk_frame)
-                self.disk_labels[mountpoint].grid(row=0, column=0, sticky='w')
+                # 清除错误提示
+                self.error_label.config(text="")
                 
-                self.disk_progressbars[mountpoint] = ttk.Progressbar(
-                    disk_frame, orient="horizontal",
-                    length=self.progress_bar_length,
-                    mode="determinate"
-                )
-                self.disk_progressbars[mountpoint].grid(row=1, column=0, sticky='w', pady=2)
+                # 添加新数据
+                for mount, info in disk_info.items():
+                    self.disk_tree.insert("", "end", values=(
+                        mount,
+                        info["总空间"],
+                        info["已用"],
+                        info["可用"],
+                        info["使用率"],
+                        info["文件系统"]
+                    ))
+            except PermissionError:
+                self.error_label.config(text="错误: 没有足够的权限访问磁盘信息")
+            except Exception as e:
+                self.error_label.config(text=f"错误: {str(e)}")
                 
-        # 更新现有磁盘信息 (Corrected Indentation - aligned with 'if')
-                disk_usage_percent = float(info['使用率'].strip('%'))
-                self.disk_labels[mountpoint].config(
-                    text=f"{mountpoint}: 总空间{info['总空间']}, "
-                         f"已用{info['已用']}, 可用{info['可用']} "
-                         f"(使用率{info['使用率']})",
-                    style=self.get_style_by_percent(info['使用率'])
-                )
-        # Ensure progressbar exists before setting value
-        if mountpoint in self.disk_progressbars:
-                self.disk_progressbars[mountpoint]['value'] = disk_usage_percent
+    def check_disk_permissions(self):
+        """检查磁盘访问权限"""
+        try:
+            # 尝试获取磁盘信息
+            get_disk_info(force_update=True)
+            if hasattr(self, 'error_label'):
+                self.error_label.config(text="权限检查: 正常", style="Good.TLabel")
+        except PermissionError:
+            if hasattr(self, 'error_label'):
+                self.error_label.config(text="权限检查: 没有足够的权限", style="Critical.TLabel")
+        except Exception as e:
+            if hasattr(self, 'error_label'):
+                self.error_label.config(text=f"权限检查错误: {str(e)}", style="Critical.TLabel")
             
     def _on_mousewheel(self, event):
         """处理鼠标滚轮事件"""

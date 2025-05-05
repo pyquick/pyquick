@@ -5,7 +5,7 @@
 """
 
 import json
-import os
+import os, sys, subprocess
 import logging
 import threading
 import time
@@ -27,6 +27,8 @@ class SettingsManager:
         self.settings_file = os.path.join(config_path, "settings.json")
         self.settings = {}
         self.default_settings = self._get_default_settings()
+        with open(self.settings_file, 'r', encoding='utf-8') as f:
+            self.user_settings = json.load(f)
         self.lock = threading.RLock()
         self._auto_save_timer = None
         self._modified = False
@@ -89,6 +91,95 @@ class SettingsManager:
                 "start_minimized": False
             }
         }
+        
+    def scan_system_python_installations(self) -> List[Dict[str, str]]:
+        """
+        扫描系统中安装的Python版本
+        
+        Returns:
+            包含Python安装信息的字典列表
+        """
+        installations = []
+        
+        # 1. 检查当前sys.executable
+        if sys.executable:
+            version = self._get_python_version(sys.executable)
+            if version:
+                installations.append({
+                    "path": sys.executable,
+                    "version": version,
+                    "default": True
+                })
+        
+        # 2. 扫描Windows注册表查找其他Python安装
+        try:
+            import winreg
+            
+            # 检查32位和64位注册表路径
+            for arch in [winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER]:
+                for key_path in [
+                    r"SOFTWARE\\Python\\PythonCore",
+                    r"SOFTWARE\\Wow6432Node\\Python\\PythonCore"
+                ]:
+                    try:
+                        with winreg.OpenKey(arch, key_path) as key:
+                            for i in range(winreg.QueryInfoKey(key)[0]):
+                                version = winreg.EnumKey(key, i)
+                                try:
+                                    with winreg.OpenKey(key, f"{version}\\InstallPath") as install_key:
+                                        path = winreg.QueryValue(install_key, "")
+                                        python_exe = os.path.join(path, "python.exe")
+                                        if os.path.exists(python_exe):
+                                            installations.append({
+                                                "path": python_exe,
+                                                "version": version,
+                                                "default": False
+                                            })
+                                except WindowsError:
+                                    continue
+                    except WindowsError:
+                        continue
+        except ImportError:
+            pass
+        
+        return installations
+        
+    def _get_python_version(self, python_path: str) -> Optional[str]:
+        """
+        获取指定Python路径的版本号
+        
+        Args:
+            python_path: Python可执行文件路径
+            
+        Returns:
+            版本号字符串，如"3.9.0"，如果获取失败返回None
+        """
+        try:
+            result = subprocess.run(
+                [python_path, "--version"],
+                capture_output=True,
+                text=True,
+                creationflags=subprocess.CREATE_NO_WINDOW
+            )
+            if result.returncode == 0:
+                version_str = result.stdout.strip()
+                if version_str.startswith("Python "):
+                    return version_str[7:]
+        except Exception:
+            pass
+        return None
+        
+    def update_python_installations(self) -> bool:
+        """
+        更新settings.json中的Python安装信息
+        
+        Returns:
+            是否成功更新
+        """
+        installations = self.scan_system_python_installations()
+        if installations:
+            return self.set_setting("python_versions.installations", installations)
+        return False
     
     def load_settings(self) -> bool:
         """
@@ -102,10 +193,10 @@ class SettingsManager:
                 if os.path.exists(self.settings_file):
                     with open(self.settings_file, 'r', encoding='utf-8') as f:
                         user_settings = json.load(f)
-                        
                     # 合并默认设置和用户设置
                     self.settings = self._merge_settings(self.default_settings.copy(), user_settings)
                     logger.info(f"已从 {self.settings_file} 加载设置")
+
                     return True
                 else:
                     # 如果设置文件不存在，使用默认设置
@@ -177,13 +268,14 @@ class SettingsManager:
         with self.lock:
             try:
                 parts = key_path.split('.')
-                current = self.settings
+                current = self.user_settings
                 
                 for part in parts:
                     current = current[part]
                 
                 return current
             except (KeyError, TypeError):
+                print(f"设置 {key_path} 不存在")
                 return default
     
     def set_setting(self, key_path: str, value: Any) -> bool:
@@ -200,7 +292,7 @@ class SettingsManager:
         with self.lock:
             try:
                 parts = key_path.split('.')
-                current = self.settings
+                current = self.user_settings
                 
                 # 遍历路径的所有部分，除了最后一个
                 for part in parts[:-1]:
@@ -215,7 +307,7 @@ class SettingsManager:
                 # 启动自动保存定时器
                 self._schedule_auto_save()
                 
-                return True
+                return current
             except Exception as e:
                 logger.error(f"设置 {key_path} 为 {value} 失败: {e}")
                 return False
@@ -290,4 +382,4 @@ class SettingsManager:
         if success and self._modified:
             success = self.save_settings()
         
-        return success 
+        return success

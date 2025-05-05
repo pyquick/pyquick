@@ -11,7 +11,7 @@ from get_system_build.block_features import is_windows11
 _disk_info = {}
 _disk_info_lock = threading.Lock()
 _last_update_time = 0
-_update_interval = 10  # 更新磁盘信息的间隔（秒）
+_update_interval = 5  # 更新磁盘信息的间隔（秒）
 
 def preload_disk_info():
     """

@@ -138,10 +138,34 @@ class ProxySettings:
         self.test_result_label = ttk.Label(test_frame, textvariable=self.test_result_var)
         self.test_result_label.pack(side=tk.LEFT, padx=5)
         
+        
+        
+        # --- Start Change ---
+        mirror_sources = self.settings_manager.get("mirror.sources", [])
+        mirror_names = []
+        if isinstance(mirror_sources, list):
+            try:
+                # Ensure each item is a dict with 'name'
+                mirror_names = [m["name"] for m in mirror_sources if isinstance(m, dict) and "name" in m]
+            except Exception as e:
+                logger.error(f"Error processing mirror sources list: {e}")
+                # Keep mirror_names empty on error
+
+        
+
+        # 网络测试按钮和结果
+        net_test_frame = ttk.Frame(self.frame)
+        net_test_frame.pack(fill=tk.X, padx=5, pady=5)
+        
+        
+        self.net_test_result_label = ttk.Label(net_test_frame, text="")
+        self.net_test_result_label.pack(side=tk.LEFT, padx=5)
+        
         # 初始化UI状态
         self._toggle_proxy_settings()
         self._on_type_changed(None)
-        
+        # _load_mirror_settings() call removed
+
     def _toggle_proxy_settings(self):
         """切换代理设置的启用状态"""
         state = "normal" if self.proxy_enabled_var.get() else "disabled"
@@ -390,6 +414,8 @@ class ProxySettings:
             logger.info(f"已应用{proxy_type.upper()}代理设置")
             return True
         except Exception as e:
+            logger.error(f"加载代理设置失败: {str(e)}")
+            logger.error(f"保存代理设置失败: {str(e)}")
             logger.error(f"应用代理设置失败: {str(e)}")
             return False
             
@@ -402,6 +428,18 @@ class ProxySettings:
                 
         logger.info("已清除代理设置")
         
+    # Removed _load_mirror_settings method
+
+
+    def _save_mirror_settings(self):
+        """保存镜像服务器选择"""
+        try:
+            selected_mirror = self.mirror_var.get()
+            self.settings_manager.set("mirror.selected", selected_mirror)
+            self.settings_manager.set("mirror.last_checked", time.strftime("%Y-%m-%d %H:%M:%S"))
+        except Exception as e:
+            logger.error(f"保存镜像设置失败: {e}")
+
     def get_frame(self):
         """返回设置框架"""
         return self.frame

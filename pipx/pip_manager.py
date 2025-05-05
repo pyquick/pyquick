@@ -183,8 +183,9 @@ class PipManager:
         refresh_pip_btn.grid(row=0, column=1, padx=15, pady=10)  # 增加内边距
         
         # 升级按钮
-        upgrade_pip_btn = ttk.Button(button_frame, text="升级pip", command=self._upgrade_pip, bootstyle="success")
-        upgrade_pip_btn.grid(row=0, column=2, padx=15, pady=10)  # 增加内边距
+        self.upgrade_pip_btn = ttk.Button(button_frame, text="升级pip", command=self._upgrade_pip, bootstyle="success")
+        self.upgrade_pip_btn.grid(row=0, column=2, padx=15, pady=10)  # 增加内边距
+        self.upgrade_pip_btn["state"] = "disabled"  # 初始禁用
         
         # Python环境信息框架
         python_frame = ttk.LabelFrame(self.parent, text="Python环境", bootstyle="primary")
@@ -328,38 +329,53 @@ class PipManager:
         self._refresh_pip_version()
         
     def _update_python_environment_info(self):
-        """从settings.json读取并更新Python环境信息"""
+        """从Python管理器获取并更新默认Python环境信息"""
         try:
-            # 默认Python信息
-            default_python = {
-                "version": sys.version.split()[0],
-                "path": sys.executable,
-                "name": "系统默认Python"
-            }
-            
-            # 尝试从设置中获取标记为default=true的Python环境
+            default_python = None
+            # 直接从settings.json的python_versions.installations中查找默认Python
             try:
                 from settings.settings_manager import get_manager
                 settings_manager = get_manager()
                 if settings_manager:
-                    # 获取安装列表
-                    installations = settings_manager.get("python.installations", [])
-                    
-                    # 查找default=true的环境
-                    for install in installations:
-                        if install.get("is_default", False) or install.get("default", False):
-                            default_python = {
-                                "version": install.get("version", "未知"),
-                                "path": install.get("path", sys.executable),
-                                "name": f"Python {install.get('version', '未知')}"
-                            }
+                    installations = settings_manager.settings.get('python_versions', {}).get('installations', [])
+                    for python in installations:
+                        if python.get('default', False):
+                            default_python = python
+                            logger.info(f"从settings.json获取到默认Python环境: {python.get('path')}")
                             break
-            except Exception as settings_error:
-                logger.error(f"从settings.json获取Python环境失败: {settings_error}")
+            except Exception as e:
+                logger.error(f"从settings.json获取默认Python版本失败: {e}")
+            
+            # 如果无法从settings_manager获取，则尝试从Python管理器获取默认环境
+            if not default_python and hasattr(self, 'python_manager') and self.python_manager:
+                try:
+                    default_python = self.python_manager.get_default_python()
+                    if default_python:
+                        logger.info(f"从Python管理器获取到默认环境: {default_python.get('path')}")
+                    else:
+                        logger.warning("Python管理器未返回默认环境")
+                except Exception as pm_error:
+                    logger.error(f"调用get_default_python失败: {pm_error}")
+            elif not default_python:
+                logger.warning("Python管理器实例不可用")
+
+            # 如果无法从管理器获取，则使用系统默认
+            if not default_python:
+                logger.info("使用系统默认Python环境")
+                default_python = {
+                    "version": sys.version.split()[0],
+                    "path": sys.executable,
+                    "name": "系统默认Python",
+                    "is_default": True # 标记为默认
+                }
             
             # 更新UI
-            self.python_env_label.config(text=f"Python {default_python.get('version', '未知')} ({default_python.get('name', '系统默认')})")
-            self.python_path_label.config(text=default_python.get('path', '未知'))
+            version = default_python.get('version', '未知')
+            name = default_python.get('name', f'Python {version}')
+            path = default_python.get('path', '未知')
+            
+            self.python_env_label.config(text=f"{name} ({version})")
+            self.python_path_label.config(text=path)
             
             # 获取当前pip版本
             try:
@@ -1041,6 +1057,9 @@ class PipManager:
                             self.current_pip_label.config(foreground="red")
                             self.latest_pip_label.config(foreground="green")
                             
+                            # 启用升级按钮
+                            self.upgrade_pip_btn["state"] = "normal"
+                            
                             # 如果设置了自动升级，自动执行升级
                             if self.auto_upgrade_var.get():
                                 logger.info("自动升级已启用，开始升级PIP")
@@ -1048,6 +1067,9 @@ class PipManager:
                         else:
                             self.current_pip_label.config(foreground="green")
                             self.latest_pip_label.config(foreground="green")
+                            
+                            # 禁用升级按钮
+                            self.upgrade_pip_btn["state"] = "disabled"
                     except Exception as ui_error:
                         logger.error(f"更新PIP版本UI失败: {ui_error}")
                 
