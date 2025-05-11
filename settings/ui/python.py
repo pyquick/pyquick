@@ -28,6 +28,7 @@ class PythonSettingsPanel(BaseSettingsPanel):
         """
         # 初始化变量
         self.installations = []  # 存储Python安装信息列表
+        self.python_installations = []  # 存储Python安装信息列表(兼容旧代码)
         self.default_version_var = tk.StringVar()
         
         # 调用父类初始化方法
@@ -80,8 +81,11 @@ class PythonSettingsPanel(BaseSettingsPanel):
         remove_button.pack(side=tk.LEFT, padx=5)
         
         # 设为默认按钮
-        default_button = ttk.Button(button_frame, text="设为默认", command=self._set_as_default)
-        default_button.pack(side=tk.LEFT, padx=5)
+        self.default_button = ttk.Button(button_frame, text="设为默认", command=self._set_as_default)
+        self.default_button.pack(side=tk.LEFT, padx=5)
+        
+        # 为版本树添加选择事件
+        self.version_tree.bind("<<TreeviewSelect>>", self._on_version_select)
         
         # 刷新按钮
         refresh_button = ttk.Button(button_frame, text="刷新", command=self._refresh_python_list)
@@ -177,6 +181,96 @@ class PythonSettingsPanel(BaseSettingsPanel):
         if len(self.installations) == 1:
             self.default_version_var.set(name)
     
+    def _on_version_select(self, event):
+        """当选择版本树中的项目时更新按钮文本"""
+        selected_item = self.version_tree.selection()
+        if not selected_item:
+            return
+
+        index = self.version_tree.index(selected_item[0])
+        if not (0 <= index < len(self.installations)):
+            return
+
+        selected_installation = self.installations[index]
+        
+        # 根据选中项的默认状态更新按钮文本
+        if selected_installation["default"]:
+            self.default_button.config(text="解除默认")
+        else:
+            self.default_button.config(text="设为默认")
+    
+    def _set_as_default(self):
+        """将所选Python安装设置为默认版本或取消默认"""
+        selected_item = self.version_tree.selection()
+        if not selected_item:
+            messagebox.showinfo("提示", "请先选择一个Python安装")
+            return
+
+        index = self.version_tree.index(selected_item[0])
+        if not (0 <= index < len(self.installations)):
+            messagebox.showerror("错误", "无效的Python安装索引")
+            return
+
+        selected_installation = self.installations[index]
+        logging.info(f"开始设置Python版本为默认: {selected_installation['path']}")
+
+        if selected_installation["default"]:
+            # 如果当前选中的已经是默认，则取消默认
+            logging.info(f"取消Python版本的默认状态: {selected_installation['path']}")
+            selected_installation["default"] = False
+            self.default_button.config(text="设为默认")
+            # 更新所有版本的状态
+            for inst in self.installations:
+                if inst["path"] == selected_installation["path"]:
+                    inst["default"] = False
+                    logging.info(f"清除相同路径版本的默认标记: {inst['path']}")
+            # 确保settings.json也被更新
+            self.settings_manager.set("python.default", None)
+        else:
+            # 将其他所有版本设置为非默认
+            logging.info("设置新默认Python版本，清除其他所有版本的默认标记")
+            for inst in self.installations:
+                inst["default"] = False
+            # 将选定版本设置为默认
+            selected_installation["default"] = True
+            self.default_button.config(text="解除默认")
+            # 更新settings.json
+            self.settings_manager.set("python.default", selected_installation["path"])
+
+        logging.info("更新Python列表并保存设置")
+        self._update_python_list()
+        self.save_settings()
+        logging.info("设置保存完成")
+
+    def _ensure_default_exists_or_set_system_default(self):
+        """确保至少有一个默认Python版本，如果没有，则尝试设置系统Python或列表中的第一个。"""
+        default_exists = any(inst.get("default", False) for inst in self.installations)
+
+        if not default_exists:
+            system_python_path = sys.executable
+            system_python_in_list = None
+            for inst in self.installations:
+                if inst["path"] == system_python_path:
+                    system_python_in_list = inst
+                    break
+            
+            if system_python_in_list:
+                system_python_in_list["default"] = True
+                logging.info(f"没有默认Python，已将系统Python '{system_python_in_list['name']}' 设为默认。")
+            elif self.installations: # 如果系统Python不在列表中，但列表不为空
+                self.installations[0]["default"] = True # 将第一个设为默认
+                logging.info(f"没有默认Python，已将列表中的第一个Python '{self.installations[0]['name']}' 设为默认。")
+            # else: 列表为空，无需操作
+
+        # 确保只有一个默认值，以防万一逻辑出错导致多个默认
+        found_one_default = False
+        for inst in self.installations:
+            if inst.get("default", False):
+                if found_one_default:
+                    inst["default"] = False # 只保留第一个找到的默认
+                else:
+                    found_one_default = True
+
     def _remove_python(self):
         """移除所选的Python安装"""
         selected_item = self.version_tree.selection()
@@ -184,47 +278,17 @@ class PythonSettingsPanel(BaseSettingsPanel):
             messagebox.showinfo("提示", "请先选择要移除的Python安装")
             return
         
-        # 获取选中项的索引
         index = self.version_tree.index(selected_item[0])
-        
-        # 检查是否为默认安装
-        if self.installations[index]["default"]:
-            if len(self.installations) > 1:
-                messagebox.showerror("错误", "无法移除默认Python安装，请先设置其他版本为默认")
-                return
-        
-        # 从列表中移除
+
+        was_default = self.installations[index]["default"]
         del self.installations[index]
         
-        # 更新UI
+        if was_default:
+            self._ensure_default_exists_or_set_system_default()
+            
         self._update_python_list()
-    
-    def _set_as_default(self):
-        """将所选Python安装设置为默认版本"""
-        selected_item = self.version_tree.selection()
-        if not selected_item:
-            messagebox.showinfo("提示", "请先选择要设为默认的Python安装")
-            return
-        
-        # 获取选中项的索引
-        index = self.version_tree.index(selected_item[0])
-        
-        # 检查索引是否有效
-        if index < 0 or index >= len(self.installations):
-            messagebox.showerror("错误", "无效的Python安装索引")
-            return
-        
-        # 取消原默认设置
-        for installation in self.installations:
-            installation["default"] = False
-        
-        # 设置新的默认版本
-        self.installations[index]["default"] = True
-        self.default_version_var.set(self.installations[index]["name"])
-        
-        # 更新UI
-        self._update_python_list()
-    
+        self.save_settings()
+
     def _refresh_python_list(self):
         """刷新Python安装列表"""
         self._update_python_list()
@@ -299,20 +363,22 @@ class PythonSettingsPanel(BaseSettingsPanel):
                 default_mark
             ))
             
-        # 添加系统Python到列表（如果不存在）
-        sys_python = {
-            "name": "系统Python",
-            "version": sys.version.split()[0],
-            "path": sys.executable,
-            "default": False
-        }
-        if not any(install["path"] == sys.executable for install in self.installations):
-            self.version_tree.insert("", "end", values=(
-                sys_python["name"],
-                sys_python["version"],
-                sys_python["path"],
-                ""
-            ))
+        # 系统Python（如果需要显示）应该首先被添加到 self.installations 列表中（例如通过"添加"或"自动检测"功能），
+        # 然后会通过上面的循环自动渲染到列表中。直接在此处向 version_tree 添加会导致UI与数据模型不一致。
+        
+        # 更新按钮文本
+        selected_items = self.version_tree.selection()
+        if selected_items:
+            # 如果有选中项，根据其默认状态更新按钮文本
+            index = self.version_tree.index(selected_items[0])
+            if 0 <= index < len(self.installations):
+                if self.installations[index]["default"]:
+                    self.default_button.config(text="解除默认")
+                else:
+                    self.default_button.config(text="设为默认")
+        else:
+            # 如果没有选中项，默认显示"设为默认"
+            self.default_button.config(text="设为默认")
     
     def _detect_python_installations(self):
         """自动检测系统中的Python安装"""
@@ -525,38 +591,119 @@ class PythonSettingsPanel(BaseSettingsPanel):
             messagebox.showinfo("成功", "已添加所选Python安装")
     
     def load_settings(self):
-        """从设置管理器加载设置"""
+        """从设置管理器加载设置，并确保数据完整性"""
         try:
-            # 加载Python安装列表
-            installations = self.settings_manager.get("python_versions.installations", [])
-            
-            # 确保是列表类型
-            if isinstance(installations, str):
+            installations_data = self.settings_manager.get("python_versions.installations", [])
+            default_version_name_from_settings = self.settings_manager.get("python_versions.default_version", "")
+
+            if isinstance(installations_data, str):
                 try:
-                    # 尝试将字符串解析为JSON
-                    installations = json.loads(installations)
-                except:
-                    logging.error("Python安装信息格式错误，重置为空列表")
-                    installations = []
+                    installations_data = json.loads(installations_data)
+                except json.JSONDecodeError:
+                    logging.error("Python安装信息JSON格式错误，重置为空列表")
+                    installations_data = []
             
-            # 如果仍然不是列表，设置为空列表
-            if not isinstance(installations, list):
-                logging.error(f"Python安装信息类型错误: {type(installations)}，重置为空列表")
-                installations = []
+            if not isinstance(installations_data, list):
+                logging.error(f"Python安装信息类型错误 (应为列表): {type(installations_data)}，重置为空列表")
+                installations_data = []
+
+            self.installations = []  # 清空以重新填充
+            processed_names = set() # 用于确保名称唯一性
+
+            for i, inst_data in enumerate(installations_data):
+                if not isinstance(inst_data, dict):
+                    logging.warning(f"跳过无效的安装条目 (非字典类型): {inst_data}")
+                    continue
+
+                path = inst_data.get("path")
+                version = inst_data.get("version") # 版本可能缺失
+                name = inst_data.get("name")
+                is_default_from_file = inst_data.get("default", False) # 保留原始default标记，稍后处理
+
+                if not path: # 路径是必需的
+                    logging.warning(f"跳过缺少路径的安装条目: {inst_data}")
+                    continue
+
+                if not name: # 如果名称不存在，则生成一个
+                    if version:
+                        base_name = f"Python {version}"
+                    elif path: # 尝试从路径生成一个基础名称
+                        # 尝试使用路径的最后两部分，或者只是文件名
+                        dir_name = os.path.basename(os.path.dirname(path))
+                        file_name = os.path.basename(path)
+                        if dir_name and dir_name.lower() != "bin" and dir_name != file_name:
+                            base_name = f"{dir_name} ({file_name})"
+                        else:
+                            base_name = f"{file_name}"
+                    else: # 不应该发生，因为path是必需的
+                        base_name = f"Python安装 {i+1}"
+                    
+                    # 确保生成的名称唯一
+                    name = base_name
+                    counter = 1
+                    while name in processed_names:
+                        name = f"{base_name} ({counter})"
+                        counter += 1
+                    logging.info(f"为路径 '{path}' 生成了名称 '{name}'")
                 
-            self.installations = installations
+                processed_names.add(name)
+                self.installations.append({
+                    "name": name,
+                    "version": version,
+                    "path": path,
+                    "default": is_default_from_file # 初始时保留从文件读取的default值
+                })
             
-            # 加载默认版本
-            default_version = self.settings_manager.get("python_versions.default_version", "")
-            self.default_version_var.set(default_version)
+            # 统一处理默认版本逻辑
+            found_default_by_name = False
+            if default_version_name_from_settings:
+                for inst in self.installations:
+                    if inst["name"] == default_version_name_from_settings:
+                        inst["default"] = True
+                        found_default_by_name = True
+                    else:
+                        inst["default"] = False # 确保只有一个是默认
             
-            # 更新UI
+            if not found_default_by_name:
+                # 如果按名称未找到默认，或名称为空，则检查是否有条目在文件中标记为default=True
+                # 或者，如果都没有，则将第一个设为默认
+                explicitly_marked_default = None
+                for inst in self.installations:
+                    if inst.get("default", False): # 检查原始的default标记
+                        if explicitly_marked_default:
+                            logging.warning(f"发现多个安装标记为默认，仅保留第一个: {explicitly_marked_default['name']}")
+                            inst["default"] = False # 取消后续的
+                        else:
+                            explicitly_marked_default = inst
+                            # 其他所有都设为非默认
+                            for other_inst in self.installations:
+                                if other_inst is not inst:
+                                    other_inst["default"] = False
+                        found_default_by_name = True # 标记已处理
+                        break # 找到第一个就够了
+                default_found = False
+                if not found_default_by_name and self.installations: # 如果还没有默认，且列表不为空
+                    if not default_found and self.python_installations:
+                        self.python_installations[0]["is_default"] = False
+                    for i in range(1, len(self.installations)):
+                        self.installations[i]["default"] = False
+                    logging.info(f"未找到明确的默认版本，将第一个安装 '{self.installations[0]['name']}' 设为默认。")
+            
+            # 更新 default_version_var 以反映当前的默认版本名称
+            current_default_name = ""
+            for inst in self.installations:
+                if inst.get("default"):
+                    current_default_name = inst["name"]
+                    break
+            self.default_version_var.set(current_default_name)
+
             self._update_python_list()
-            
-            logging.debug("Python版本设置加载成功")
+            logging.debug("Python版本设置加载成功，并已进行数据整理。")
         except Exception as e:
-            logging.error(f"加载Python版本设置时出错: {e}")
+            logging.error(f"加载Python版本设置时发生严重错误: {e}", exc_info=True)
             self.installations = []
+            self.default_version_var.set("") # 确保UI在出错时也更新
+            self._update_python_list()
     
     def save_settings(self):
         """保存设置到设置管理器"""

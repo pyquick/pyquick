@@ -128,23 +128,17 @@ def install_package(package_name, version=None, upgrade=False, show_output=True)
         package_spec = package_name
         if version:
             package_spec = f"{package_name}=={version}"
-            
         logger.info(f"开始安装包: {package_spec}")
-        
         # 根据系统选择合适的命令
         if platform.system() == "Windows":
             base_cmd = ["py", "-3", "-m", "pip"]
         else:
             base_cmd = ["pip3"]
-            
         # 构建安装命令
         cmd = base_cmd + ["install"]
-        
         if upgrade:
             cmd.append("--upgrade")
-            
         cmd.append(package_spec)
-        
         # 执行安装命令
         logger.info(f"执行命令: {' '.join(cmd)}")
         process = subprocess.Popen(
@@ -153,10 +147,8 @@ def install_package(package_name, version=None, upgrade=False, show_output=True)
             stderr=subprocess.PIPE,
             text=True
         )
-        
         # 获取结果
         stdout, stderr = process.communicate()
-        
         if process.returncode == 0:
             logger.info(f"包 {package_name} 安装成功")
             return True

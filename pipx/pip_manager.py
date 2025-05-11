@@ -21,6 +21,8 @@ import re
 import requests
 import time
 
+from log.log import app_logger
+
 logger = logging.getLogger(__name__)
 
 class PipManager:
@@ -423,10 +425,11 @@ class PipManager:
         def do_load():
             try:
                 # 获取当前选择的Python环境
-                current_python = self._get_current_python()
+                current_python = self._get_current_python().strip(" ")
+                app_logger.info(f"line429,选择的pip版本为{current_python}")
                 if not current_python:
                     raise Exception("未找到Python环境")
-                    
+                
                 # 获取已安装的包
                 result = subprocess.run(
                     [current_python, "-m", "pip", "list", "--format=json"],
@@ -517,16 +520,18 @@ class PipManager:
         try:
             # 从设置中获取标记为default=true的Python环境
             try:
-                from settings.settings_manager import get_manager
-                settings_manager = get_manager()
+                from settings.save import SettingsManager
+                from save_path import create_folder
+                from typing import Dict, Any, Optional, List, Tuple, Union
+                version="1965"
+                config_path=create_folder.get_path("pyquick",version)
+                settings_manager =SettingsManager(config_path)
+                user_setting=settings_manager.load_settings()
                 if settings_manager:
                     # 获取安装列表
-                    installations = settings_manager.get("python.installations", [])
+                    installations = settings_manager.get_setting("python.installations.path",user_setting)
                     
-                    # 查找default=true的环境
-                    for install in installations:
-                        if install.get("is_default", False) or install.get("default", False):
-                            return install.get("path", sys.executable)
+                    return installations
             except Exception as settings_error:
                 logger.error(f"从settings.json获取Python路径失败: {settings_error}")
             
