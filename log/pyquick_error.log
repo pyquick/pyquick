@@ -11,3 +11,6 @@
 2025-04-28 20:29:03,855 - error - ERROR - 任务进度更新错误: 'int' object is not iterable
 2025-04-28 20:29:04,967 - error - ERROR - 任务进度更新错误: 'int' object is not iterable
 2025-04-28 20:29:05,967 - error - ERROR - 任务进度更新错误: 'int' object is not iterable
+2025-05-12 13:24:28,337 - error - ERROR - [31m启动磁盘信息监控失败: name 'DiskInfoMonitor' is not defined[0m
+2025-05-12 13:24:56,149 - error - ERROR - [31m启动磁盘信息监控失败: name 'DiskInfoMonitor' is not defined[0m
+2025-05-12 13:28:34,060 - error - ERROR - [31m启动磁盘信息监控失败: name 'DiskInfoMonitor' is not defined[0m

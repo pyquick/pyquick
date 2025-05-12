@@ -56,7 +56,8 @@ import sv_ttk
 import datetime
 from bs4 import BeautifulSoup
 import importlib
-
+from log import app_logger, error_logger, configure_global_loggers
+from disk_info import DiskInfoMonitor  # 导入磁盘信息监控模块
 # 导入内部模块
 try:
     from log import app_logger, error_logger, configure_global_loggers
@@ -109,13 +110,20 @@ open.repair_path(version)#修复缓存路径
 config_path=create_folder.get_path("pyquick",version)
 cancel_event = threading.Event()
 create_folder.folder_create("pyquick",version)
-a=SettingsManager(config_path)
-b=a.load_settings()
-d=a.scan_system_python_installations()
-e=a.set_setting("python_versions.installations",d)["installations"]
-f=a._merge_user_settings(e,b,"python_versions.installations")
-a.save_settings(f)
-app_logger.info("已自动扫描并更新系统Python版本信息。")
+try:
+    from config import Config
+    if not Config("2050").get_pre_load_python():
+        a=SettingsManager(config_path)
+        b=a.load_settings()
+        d=a.scan_system_python_installations()
+        e=a.set_setting("python_versions.installations",d)["installations"]
+        f=a._merge_user_settings(e,b,"python_versions.installations")
+        a.save_settings(f)
+        app_logger.info("已自动扫描并更新系统Python版本信息。")
+    else:
+        app_logger.info("无需预加载Python功能。")
+except:
+    app_logger.error("配置文件加载失败，使用默认设置。")
 def setup_error_logger():
     """设置错误日志记录器"""
     try:

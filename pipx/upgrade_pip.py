@@ -9,18 +9,23 @@ import platform
 from settings.save import SettingsManager
 from save_path import create_folder
 from typing import Dict, Any, Optional, List, Tuple, Union
+# 配置日志
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 version="1965"
 config_path=create_folder.get_path("pyquick",version)
 manage=SettingsManager(config_path)
 settings_all=manage.load_settings()
 python=(manage.get_setting("python_versions.installations"))
+
 for i in python:
     if i["default"]==True:
         path_python=i["path"]
         break
-# 配置日志
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+
+   
+
 
 def get_current_pip_version() -> str:
     """获取当前pip版本"""
