@@ -16,7 +16,7 @@ import threading
 import subprocess
 import platform
 from typing import Dict, Any, List, Optional, Tuple
-import winreg
+
 import re
 
 logger = logging.getLogger(__name__)
@@ -395,15 +395,99 @@ class PythonManager:
         # 提示用户重启应用以使用新版本
         messagebox.showinfo("提示", "默认Python版本已更改。请重启应用程序以使用新版本。")
         
+    def _get_python_version(self, python_path: str) -> Dict[str, str]:
+        """
+        获取指定Python路径的版本信息
+        
+        Args:
+            python_path: Python可执行文件路径
+            
+        Returns:
+            包含版本信息的字典，格式为{"version": "X.Y.Z", "path": "python_path"}
+        """
+        try:
+            # 运行Python获取版本信息
+            version_cmd = [
+                python_path, 
+                "-c", 
+                "import sys; import platform; print(f'{platform.python_version()}|{sys.executable}')"
+            ]
+            result = subprocess.run(
+                version_cmd, 
+                capture_output=True, 
+                text=True, 
+                check=False, 
+                timeout=3  # 3秒超时
+            )
+            
+            if result.returncode == 0 and "|" in result.stdout:
+                parts = result.stdout.strip().split("|")
+                if len(parts) >= 2:
+                    return {
+                        "version": parts[0],
+                        "path": parts[1]
+                    }
+            
+            # 如果上面的方法失败，尝试另一种简单的方式
+            version_simple = subprocess.run(
+                [python_path, "--version"], 
+                capture_output=True, 
+                text=True,
+                check=False,
+                timeout=3
+            )
+
+            
+            if version_simple.returncode == 0:
+                # 通常输出形式为 "Python X.Y.Z"
+                version_text = version_simple.stdout or version_simple.stderr
+                if "Python" in version_text:
+                    version = version_text.split("Python")[1].strip()
+                    return {
+                        "version": version,
+                        "path": python_path
+                    }
+            
+            return {"version": "未知", "path": python_path}
+            
+        except Exception as e:
+            logger.error(f"获取Python版本信息失败: {str(e)}")
+            return {"version": "未知", "path": python_path}
+            
     def _get_python_installations_from_registry(self) -> List[Dict[str, str]]:
         """
-        从Windows注册表读取Python安装信息
+        从系统特定位置读取Python安装信息
+        Windows: 注册表
+        macOS: 常见安装路径
 
         Returns:
             包含Python安装信息的字典列表
         """
         installations = []
-        if platform.system() != "Windows":
+        system = platform.system()
+        
+        if system == "Darwin":  # macOS
+            # macOS常见的Python安装路径
+            common_paths = [
+                "/usr/local/bin/python3",
+                "/usr/bin/python3",
+                "/opt/homebrew/bin/python3",
+                os.path.expanduser("~/Library/Python/*/bin/python3"),
+                "/Applications/Python *.app/Contents/MacOS/python"
+            ]
+            
+            # 检查每个路径是否存在
+            for path_pattern in common_paths:
+                import glob
+                for path in glob.glob(path_pattern):
+                    if os.path.exists(path) and path not in [inst['path'] for inst in installations]:
+                        version = self._get_python_version(path)["version"]
+                        installations.append({"version": version, "path": path, "is_default": False})
+                        logger.debug(f"从macOS路径找到Python: {version} at {path}")
+            
+            return installations
+            
+        elif system != "Windows":
             return installations
 
         # 获取注册表搜索路径 from settings_manager
@@ -416,6 +500,7 @@ class PythonManager:
         )
 
         for base_path in registry_paths:
+            import winreg
             try:
                 # 打开注册表项
                 # HKEY_CURRENT_USER

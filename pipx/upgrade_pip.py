@@ -28,13 +28,28 @@ for i in python:
 
 
 def get_current_pip_version() -> str:
-    """获取当前pip版本"""
+    """获取当前pip版本
+    
+    始终使用默认Python路径执行pip命令，确保版本检测一致性
+    """
     try:
+        # 获取默认Python路径
+        manage = SettingsManager(config_path)
+        python_versions = manage.get_setting("python_versions.installations")
+        default_python = next((p for p in python_versions if p["default"]), None)
+        
+        if not default_python:
+            logger.error("未找到默认Python版本")
+            return ""
+            
+        python_path = default_python["path"]
+        
         # 根据系统选择合适的命令
         if platform.system() == "Windows":
-            cmd = [path_python, "-3", "-m", "pip", "--version"]
+            cmd = [python_path, "-3", "-m", "pip", "--version"]
         else:
-            cmd = [path_python, "--version"]#macOS
+            cmd = [python_path, "-m", "pip", "--version"]
+            
         output = subprocess.check_output(cmd, stderr=subprocess.STDOUT, text=True)
         if "pip" in output:
             version = output.split()[1]

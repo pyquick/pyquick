@@ -9,3 +9,4 @@ def get_mac_machine():
         return "Intel"
     else:
         return "Apple Silicon" 
+print(get_mac_machine())

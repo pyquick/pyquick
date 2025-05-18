@@ -518,28 +518,31 @@ class PipManager:
     def _get_current_python(self):
         """获取当前Python环境路径"""
         try:
-            # 从设置中获取标记为default=true的Python环境
+            # 优先从Python管理器获取默认环境
+            if hasattr(self, 'python_manager') and self.python_manager:
+                default_python = self.python_manager.get_default_python()
+                if default_python and 'path' in default_python:
+                    return default_python['path']
+            
+            # 其次从设置中获取标记为default=true的Python环境
             try:
                 from settings.save import SettingsManager
                 from save_path import create_folder
                 from typing import Dict, Any, Optional, List, Tuple, Union
                 version="1965"
                 config_path=create_folder.get_path("pyquick",version)
-                settings_manager =SettingsManager(config_path)
-                user_setting=settings_manager.load_settings()
+                settings_manager = SettingsManager(config_path)
+                user_setting = settings_manager.load_settings()
                 if settings_manager:
-                    # 获取安装列表
-                    installations = settings_manager.get_setting("python.installations.path",user_setting)
-                    
-                    return installations
+                    # 获取所有安装的Python路径
+                    installations = settings_manager.get_setting("python_versions.installations", user_setting)
+                    if installations:
+                        # 查找标记为default的Python环境
+                        for install in installations:
+                            if install.get('default', False):
+                                return install['path']
             except Exception as settings_error:
                 logger.error(f"从settings.json获取Python路径失败: {settings_error}")
-            
-            # 尝试从Python管理器获取默认环境
-            if hasattr(self, 'python_manager') and self.python_manager:
-                default_python = self.python_manager.get_default_python()
-                if default_python and 'path' in default_python:
-                    return default_python['path']
             
             # 兜底：返回系统Python路径
             return sys.executable
@@ -1035,6 +1038,9 @@ class PipManager:
         self.current_pip_var.set("当前版本: 获取中...")
         self.latest_pip_var.set("最新版本: 获取中...")
         
+        # 禁用升级按钮直到版本检查完成
+        self.upgrade_pip_btn["state"] = "disabled"
+        
         # 尝试更新当前pip版本标签的样式
         try:
             self.current_pip_label.config(foreground="black")
@@ -1045,6 +1051,8 @@ class PipManager:
         def do_refresh():
             try:
                 python_path = self._get_current_python()
+                if not python_path:
+                    raise ValueError("无法获取有效的Python路径")
                 
                 # 获取当前版本
                 current_version = self._get_current_pip_version(python_path)
@@ -1054,8 +1062,8 @@ class PipManager:
                 # 更新界面
                 def update_ui():
                     try:
-                        self.current_pip_var.set(f"当前版本: {current_version}")
-                        self.latest_pip_var.set(f"最新版本: {latest_version}")
+                        self.current_pip_var.set(f"当前版本: {current_version or '获取失败'}")
+                        self.latest_pip_var.set(f"最新版本: {latest_version or '获取失败'}")
                         
                         # 如果版本不一致，用红色显示当前版本
                         if current_version and latest_version and current_version != latest_version:
@@ -1073,10 +1081,12 @@ class PipManager:
                             self.current_pip_label.config(foreground="green")
                             self.latest_pip_label.config(foreground="green")
                             
-                            # 禁用升级按钮
+                            # 确保版本一致时禁用升级按钮
                             self.upgrade_pip_btn["state"] = "disabled"
                     except Exception as ui_error:
                         logger.error(f"更新PIP版本UI失败: {ui_error}")
+                        # 出错时也禁用升级按钮
+                        self.upgrade_pip_btn["state"] = "disabled"
                 
                 if self.parent and hasattr(self.parent, 'after'):
                     self.parent.after(0, update_ui)
@@ -1087,6 +1097,8 @@ class PipManager:
                 def show_error():
                     self.current_pip_var.set("当前版本: 获取失败")
                     self.latest_pip_var.set("最新版本: 获取失败")
+                    # 出错时禁用升级按钮
+                    self.upgrade_pip_btn["state"] = "disabled"
                 
                 if self.parent and hasattr(self.parent, 'after'):
                     self.parent.after(0, show_error)

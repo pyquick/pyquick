@@ -8,8 +8,9 @@ memory-profiler==0.61.0
 # 图形界面依赖
 PyQt6
 sv_ttk>=2.6.0
-"PySide6-Fluent-Widgets[Full]"
+PySide6-Fluent-Widgets[Full]
 ttkbootstrap>=1.10.1
 beautifulsoup4>=4.11.1
 cryptography>=37.0.4
+winreg
 lxml>=4.9.1
