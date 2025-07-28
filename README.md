@@ -1,7 +1,7 @@
 ## Hi there 👋
 
 ## My repo
-[![](https://github-readme-stats.vercel.app/api/pin/?username=pyquick&repo=pyquick)](https://github.com/pyquick/pyquick)
+[![](https://github-readme-stats.vercel.app/api/pin/?username=pyquick&repo=_pyquick_)](https://github.com/pyquick/_pyquick_)
 
 ## My Github stats
 
