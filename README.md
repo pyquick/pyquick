@@ -3,6 +3,8 @@
 ## My repo
 [![](https://github-readme-stats.vercel.app/api/pin/?username=pyquick&repo=_pyquick_)](https://github.com/pyquick/_pyquick_)
 
+[![](https://github-readme-stats.vercel.app/api/pin/?username=pyquick&repo=OCLP-R)](https://github.com/pyquick/OCLP-R)
+
 ## My Github stats
 
 ![My GitHub stats](https://github-readme-stats.vercel.app/api?username=pyquick&show_icons=true&theme=radical)
@@ -11,4 +13,5 @@
 
 
 I'm a developer. Also, I'm a student (age:14) in **China** ! I‘m interested in **C++**, **Python** and **swift**.
-I'm the main Contributor of pyquick.
+
+I'm also interested in Hackintosh. And I run hackintosh machine! (I don't have any Macs!)
