@@ -1,4 +1,4 @@
-## Hi there 👋
+## Hi there 👋 <img src="https://github.githubassets.com/images/mona-loading-dark.gif" width="50px" height="50px"/>
 
 ## My repo
 [![](https://github-readme-stats.vercel.app/api/pin/?username=pyquick&repo=_pyquick_)](https://github.com/pyquick/_pyquick_)
