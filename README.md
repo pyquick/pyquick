@@ -1,9 +1,9 @@
 ## Hi there 👋 <img src="https://github.githubassets.com/images/mona-loading-dark.gif" width="50px" height="50px"/>
 
 ## My repo
-[![](https://github-readme-stats.vercel.app/api/pin/?username=pyquick&repo=_pyquick_)](https://github.com/pyquick/_pyquick_)
+[![](https://github-readme-stats.vercel.app/api/pin/?username=hackdoc&repo=pyquick)](https://github.com/pyquick/_pyquick_)
 
-[![](https://github-readme-stats.vercel.app/api/pin/?username=pyquick&repo=OCLP-R)](https://github.com/pyquick/OCLP-R)
+[![](https://github-readme-stats.vercel.app/api/pin/?username=hackdoc&repo=OCLP-R)](https://github.com/pyquick/OCLP-R)
 
 ## My Github stats
 
