@@ -7,10 +7,7 @@
 
 ## My Github stats
 
-![My GitHub stats](https://github-readme-stats.vercel.app/api?username=pyquick&show_icons=true&theme=radical)
-
-![Top Langs](https://github-readme-stats.vercel.app/api/top-langs/?username=pyquick&langs_count=6)
-
+![My GitHub stats](https://github-readme-stats-fast.vercel.app/api?username=pyquick&show_icons=true&theme=radical)
 
 I'm a developer. Also, I'm a student (age:14) in **China** ! I‘m interested in **C++**, **Python** and **swift**.
 
