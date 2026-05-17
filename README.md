@@ -10,4 +10,6 @@ I'm a developer. Also, I'm a student (age:14) in **China** ! I‘m interested in
 
 I'm also interested in Hackintosh. And I run hackintosh machine! (I don't have any Macs!)
 
-Please Go To $2^{31}$ to find me
+## Hackdoc View
+
+If you want go to OCLP-R, please go to [OCLP-R](https://github.com/hackdoc/OCLP-R) to visit this repo.
