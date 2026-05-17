@@ -8,6 +8,7 @@
 ## My Github stats
 
 ![My GitHub stats](https://github-readme-stats-fast.vercel.app/api?username=pyquick&show_icons=true&theme=radical)
+![Profile](https://komarev.com/ghpvc/?username=pyquick&style=flat-square)
 
 I'm a developer. Also, I'm a student (age:14) in **China** ! I‘m interested in **C++**, **Python** and **swift**.
 
