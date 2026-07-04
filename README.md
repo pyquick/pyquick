@@ -6,9 +6,7 @@
 
 ![Profile](https://komarev.com/ghpvc/?username=pyquick&style=flat-square)
 
-I'm a developer. Also, I'm a student (age:14) in **China** ! I‘m interested in **C++**, **Python** and **swift**.
-
-I'm also interested in Hackintosh. And I run hackintosh machine! (I don't have any Macs!)
+Hi! I'm Ghltbm, a developer. I focus on Hackintosh and Software.
 
 ## Hackdoc View
 
